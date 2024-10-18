@@ -1,0 +1,29 @@
+- Tables:
+  - User: Standard user account, can CRUD games
+      username: String
+      email: String
+      pass: String (hashed)
+      owns: Game[]
+  - Game: Contains players & leaderboards
+      players: Player[]
+      boards: Leaderboard[] (1 free)
+  - Leaderboard: Ranks players with ratings & strategies
+  - Strategy: Compares & reassigns 2 ratings
+  - Rating: 
+- Paid Features:
+    - Multiple games 
+    - Multiple leadeboards
+    - Customiza
+
+
+
+
+  - Player: Player 
+  - user-auth: Auth credentials provided by user
+  - server-auth: Auth credentials provided by game server
+- Routes:
+  - GET:
+    - User:
+        body: user-auth
+        returns: User Info
+    - Player: 
