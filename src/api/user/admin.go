@@ -9,7 +9,6 @@ import (
 
 // CreateUser creates the user with the provided username, email, and password.
 // Requires admin.
-// Returns the user struct.
 func CreateUser(ctx echo.Context) error {
 	//TODO
 	return nil
@@ -17,7 +16,6 @@ func CreateUser(ctx echo.Context) error {
 
 // GetUser finds the user matching the provided ID.
 // Requires admin.
-// Returns the user struct.
 func GetUser(ctx echo.Context) error {
 	idStr := ctx.QueryParam("id")
 	if idStr == "" {

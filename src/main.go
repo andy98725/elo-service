@@ -2,6 +2,7 @@ package main
 
 import (
 	"com/everlastinggames/elo/src/api"
+	"com/everlastinggames/elo/src/server"
 
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
@@ -15,7 +16,7 @@ func main() {
 	e.Use(middleware.Recover())
 	e.Logger.SetLevel(log.DEBUG)
 
-	s, err := initServer(e)
+	s, err := server.InitServer(e)
 	if err != nil {
 		e.Logger.Fatal(err)
 		panic(err)
