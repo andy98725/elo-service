@@ -6,9 +6,9 @@
 - [ ] User auth routes
 - [ ] Game creation routes
 - [ ] Postman collection
-- [ ] Dockerize
-- [ ] Makefile
-- [ ] Docker-compose for sql
+- [x] Dockerize
+- [x] Makefile
+- [x] Docker-compose for sql
 
 
 ## Matchmaking Usable

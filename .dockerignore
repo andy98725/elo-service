@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# IDE specific files
+.idea
+.vscode
+*.swp
+*.swo
+
+# Build and binary files
+bin/
+tmp/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Testing
+*.test
+*.out
+coverage.txt
+
+# Environment and local config
+*.env
+!config.env
+*.local
+
+# Dependency directories
+vendor/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Project specific
+README.md
+LICENSE
+docs/
+*.md
+!README.md 
