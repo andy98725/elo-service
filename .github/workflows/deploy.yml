@@ -3,7 +3,8 @@ name: Deploy to Fly.io
 on:
   push:
     branches:
-      - production
+      - main
+      - production # TODO: Separate deployment
 
 jobs:
   deploy:
