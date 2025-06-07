@@ -4,14 +4,30 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/andy98725/elo-service/src/models"
 	"github.com/labstack/echo"
 )
 
 // CreateUser creates the user with the provided username, email, and password.
-// Requires admin.
 func CreateUser(ctx echo.Context) error {
-	//TODO
-	return nil
+	username := ctx.QueryParam("username")
+	email := ctx.QueryParam("email")
+	password := ctx.QueryParam("password")
+
+	if username == "" || email == "" || password == "" {
+		return errors.New("missing required fields")
+	}
+
+	user, err := models.Create(models.CreateUserParams{
+		Username: username,
+		Email:    email,
+		Password: password,
+	})
+	if err != nil {
+		return errors.New("error creating user: " + err.Error())
+	}
+
+	return ctx.JSON(200, user.ToResp())
 }
 
 // GetUser finds the user matching the provided ID.

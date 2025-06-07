@@ -8,7 +8,7 @@ services:
     environment:
       - DB_USERNAME=goserv
       - DB_PASSWORD=gopass
-      - DATABASE_URL=postgres:5432
+      - DATABASE_URL=postgres
       - DATABASE_NAME=postgres
     depends_on:
       - postgres

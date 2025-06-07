@@ -1,4 +1,6 @@
-.PHONY: up down build logs clean
+.PHONY: fresh up down build logs clean
+
+fresh: down build up logs
 
 up:
 	docker-compose up -d

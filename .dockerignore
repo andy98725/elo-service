@@ -40,3 +40,5 @@ LICENSE
 docs/
 *.md
 !README.md 
+
+makefile

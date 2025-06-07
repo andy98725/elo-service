@@ -10,11 +10,11 @@ func InitRoutes(e *echo.Echo) error {
 	e.POST("/users/register", RegisterUser)
 	e.POST("/users/login", Login)
 
-	e.POST("/users/new", CreateUser)
-	e.GET("/users/get", GetUser, auth.RequireAuth)
-	e.GET("/users", GetUsers, auth.RequireAdmin)
-	e.POST("/users/update", UpdateUser, auth.RequireAuth)
-	e.DELETE("/users/delete", DeleteUser, auth.RequireAuth)
+	e.POST("/user", CreateUser)
+	e.GET("/user", GetUser, auth.RequireAuth)
+	e.GET("/users", GetUsers, auth.RequireAuth)
+	e.PUT("/user", UpdateUser, auth.RequireAuth)
+	e.DELETE("/user", DeleteUser, auth.RequireAuth)
 
 	return nil
 }

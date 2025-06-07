@@ -1,14 +1,14 @@
 package server
 
 import (
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 type Server struct {
@@ -16,7 +16,7 @@ type Server struct {
 		port string
 	}
 	Logger *slog.Logger
-	DB     *sql.DB
+	DB     *gorm.DB
 	e      *echo.Echo
 }
 
@@ -35,13 +35,15 @@ func InitServer(e *echo.Echo) (Server, error) {
 		S.Config.port = "8080"
 	}
 
-	db, err := sql.Open("pgx", fmt.Sprintf(
-		"postgres://%s:%s@%s/%s",
+	dsn := fmt.Sprintf(
+		"host=%s user=%s password=%s dbname=%s port=5432 sslmode=disable",
+		os.Getenv("DATABASE_URL"),
 		os.Getenv("DB_USERNAME"),
 		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DATABASE_URL"),
 		os.Getenv("DATABASE_NAME"),
-	))
+	)
+
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		return *S, err
 	}
@@ -50,6 +52,7 @@ func InitServer(e *echo.Echo) (Server, error) {
 
 	return *S, nil
 }
+
 func (s *Server) Start() {
 	s.e.Logger.Fatal(S.e.Start(":" + S.Config.port))
 }
