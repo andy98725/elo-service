@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo"
 )
