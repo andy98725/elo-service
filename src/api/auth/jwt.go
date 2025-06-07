@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/andy98725/elo-service/src/models"
+	"github.com/andy98725/elo-service/src/server"
 
 	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"
@@ -13,25 +14,32 @@ import (
 
 var jwtKey = []byte(os.Getenv("JWT_SECRET_KEY"))
 
+const (
+	ERR_INVALID_CREDENTIALS = "invalid email or password"
+)
+
 type Claims struct {
 	UserID   string `json:"user_id"`
 	Username string `json:"username"`
 	jwt.StandardClaims
 }
 
-func Login(username, password string) (string, error) {
-	user, err := models.GetByUsername(username)
+func Login(email, password string) (string, error) {
+	user, err := models.GetByEmail(email)
 	if err != nil {
-		return "", err
+		server.S.Logger.Warn("Invalid email", "error", err)
+		return "", errors.New(ERR_INVALID_CREDENTIALS)
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
 	if err != nil {
-		return "", errors.New("invalid email or password")
+		server.S.Logger.Warn("Invalid password", "error", err)
+		return "", errors.New(ERR_INVALID_CREDENTIALS)
 	}
 
 	token, err := generateToken(user.ID, user.Username)
 	if err != nil {
+		server.S.Logger.Error("Token generation failed", "error", err)
 		return "", err
 	}
 

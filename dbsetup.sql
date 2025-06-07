@@ -12,9 +12,8 @@ CREATE TABLE users (
     is_admin BOOLEAN NOT NULL DEFAULT FALSE
 );
 
--- Insert admin user if not exists
-INSERT INTO users (username, email, password, created_at, is_admin)
-SELECT 'admin', 'admin@example.com', 'admin', CURRENT_TIMESTAMP, TRUE
-WHERE NOT EXISTS (
-    SELECT 1 FROM users WHERE username = 'admin'
-);
+-- TODO: Add admin user manually
+-- Then set is_admin to true
+UPDATE users 
+SET is_admin = TRUE 
+WHERE username = 'tetr4';

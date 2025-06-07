@@ -6,7 +6,8 @@
 Connect locally to postgres
 
 ```
-psql -U postgres -d postgres
+docker ps
+docker exec -it <postgres_container> psql -U goserv -d postgres
 ```
 
 

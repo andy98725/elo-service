@@ -39,6 +39,8 @@ README.md
 LICENSE
 docs/
 *.md
-!README.md 
+spec.yaml
 
+# Build and CI
 makefile
+*.toml

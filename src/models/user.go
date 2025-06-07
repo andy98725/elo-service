@@ -38,7 +38,7 @@ type CreateUserParams struct {
 	Password string
 }
 
-func Create(params CreateUserParams) (*User, error) {
+func CreateUser(params CreateUserParams) (*User, error) {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(params.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
@@ -58,6 +58,17 @@ func Create(params CreateUserParams) (*User, error) {
 	return user, nil
 }
 
+func GetUsers(page, pageSize int) ([]User, error, int) {
+	var users []User
+	offset := page * pageSize
+	result := server.S.DB.Offset(offset).Limit(pageSize).Find(&users)
+	nextPage := page + 1
+	if result.RowsAffected < int64(pageSize) {
+		nextPage = -1
+	}
+	return users, result.Error, nextPage
+}
+
 func GetByUsername(username string) (*User, error) {
 	var user User
 	result := server.S.DB.Where("username = ?", username).First(&user)
@@ -67,6 +78,7 @@ func GetByUsername(username string) (*User, error) {
 func GetByEmail(email string) (*User, error) {
 	var user User
 	result := server.S.DB.Where("email = ?", email).First(&user)
+	server.S.Logger.Info("User", "user", user)
 	return &user, result.Error
 }
 
