@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/andy98725/elo-service/src/api"
+	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
 
 	"github.com/labstack/echo"
@@ -18,6 +19,11 @@ func main() {
 
 	s, err := server.InitServer(e)
 	if err != nil {
+		e.Logger.Fatal(err)
+		panic(err)
+	}
+
+	if err = models.Migrate(); err != nil {
 		e.Logger.Fatal(err)
 		panic(err)
 	}

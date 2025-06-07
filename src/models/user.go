@@ -1,9 +1,11 @@
 package models
 
 import (
+	"errors"
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
+	"github.com/labstack/echo"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -58,7 +60,7 @@ func CreateUser(params CreateUserParams) (*User, error) {
 	return user, nil
 }
 
-func GetUsers(page, pageSize int) ([]User, error, int) {
+func GetUsers(page, pageSize int) ([]User, int, error) {
 	var users []User
 	offset := page * pageSize
 	result := server.S.DB.Offset(offset).Limit(pageSize).Find(&users)
@@ -66,7 +68,7 @@ func GetUsers(page, pageSize int) ([]User, error, int) {
 	if result.RowsAffected < int64(pageSize) {
 		nextPage = -1
 	}
-	return users, result.Error, nextPage
+	return users, nextPage, result.Error
 }
 
 func GetByUsername(username string) (*User, error) {
@@ -86,4 +88,17 @@ func GetById(id string) (*User, error) {
 	var user User
 	result := server.S.DB.First(&user, "id = ?", id)
 	return &user, result.Error
+}
+
+func UserIDFromContext(ctx echo.Context) (string, error) {
+	user := ctx.Get("user").(*User)
+	if user == nil {
+		return "", errors.New("user not found in context")
+	}
+
+	if user.IsAdmin && ctx.QueryParam("id") != "" {
+		return ctx.QueryParam("id"), nil
+	}
+
+	return user.ID, nil
 }

@@ -40,7 +40,6 @@ func Register(ctx echo.Context) error {
 	if req.Username == "" || req.Email == "" || req.Password == "" {
 		return errors.New("missing required fields")
 	}
-	server.S.Logger.Info("Creating user", "username", req.Username, "email", req.Email, "password", req.Password)
 
 	user, err := models.CreateUser(models.CreateUserParams{
 		Username: req.Username,
@@ -88,14 +87,12 @@ func Login(c echo.Context) error {
 }
 
 func GetUser(ctx echo.Context) error {
-	user := ctx.Get("user").(*models.User)
-
-	userId := user.ID
-	if user.IsAdmin && ctx.QueryParam("id") != "" {
-		userId = ctx.QueryParam("id")
+	userID, err := models.UserIDFromContext(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "error getting user: "+err.Error())
 	}
 
-	user, err := models.GetById(userId)
+	user, err := models.GetById(userID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "error getting user: "+err.Error())
 	}
@@ -122,7 +119,7 @@ func GetUsers(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid pageSize param")
 	}
 
-	users, err, nextPage := models.GetUsers(pageInt, pageSizeInt)
+	users, nextPage, err := models.GetUsers(pageInt, pageSizeInt)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "error getting users")
 	}
