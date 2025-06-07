@@ -10,7 +10,9 @@ import (
 
 func InitRoutes(e *echo.Echo) error {
 	e.GET("/health", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, struct{ Status string }{Status: "healthy"})
+		return c.JSON(http.StatusOK, struct {
+			Status string `json:"status"`
+		}{Status: "healthy!"})
 	})
 
 	if err := user.InitRoutes(e); err != nil {
