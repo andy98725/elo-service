@@ -1,9 +1,10 @@
 package auth
 
 import (
-	"database/sql"
 	"net/http"
 
+	"github.com/andy98725/elo-service/src/models"
+	"github.com/andy98725/elo-service/src/server"
 	"github.com/labstack/echo"
 )
 
@@ -27,6 +28,12 @@ func RequireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 		// Add claims to context
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
+		user, err := models.GetById(claims.UserID)
+		if err != nil {
+			server.S.Logger.Error("Error getting user", "error", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "Error getting user: "+err.Error())
+		}
+		c.Set("user", user)
 
 		return next(c)
 	}
@@ -34,17 +41,9 @@ func RequireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 
 func RequireAdmin(next echo.HandlerFunc) echo.HandlerFunc {
 	return RequireAuth(func(c echo.Context) error {
-		db := c.Get("db").(*sql.DB)
-		userID := c.Get("user_id").(string)
+		user := c.Get("user").(*models.User)
 
-		var isAdmin bool
-
-		err := db.QueryRow("SELECT is_admin FROM users WHERE id = $1", userID).Scan(&isAdmin)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Error checking admin status")
-		}
-
-		if !isAdmin {
+		if !user.IsAdmin {
 			return echo.NewHTTPError(http.StatusForbidden, "Admin access required")
 		}
 
