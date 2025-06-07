@@ -28,6 +28,7 @@ type Game struct {
 	CreatedAt   time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 	// TODO separate into leaderboard if needed
 	GuestsAllowed          bool   `json:"guests_allowed" gorm:"default:true"`
+	LobbySize              int    `json:"lobby_size" gorm:"default:2"`
 	MatchmakingStrategy    string `json:"matchmaking_strategy" gorm:"not null"`
 	MatchmakingMachineName string `json:"matchmaking_machine_name" gorm:"not null"`
 	ELOStrategy            string `json:"elo_strategy" gorm:"not null"`
@@ -39,6 +40,7 @@ type GameResp struct {
 	Name                   string `json:"name"`
 	Description            string `json:"description"`
 	GuestsAllowed          bool   `json:"guests_allowed"`
+	LobbySize              int    `json:"lobby_size"`
 	MatchmakingStrategy    string `json:"matchmaking_strategy"`
 	MatchmakingMachineName string `json:"matchmaking_machine_name"`
 	ELOStrategy            string `json:"elo_strategy"`
@@ -51,6 +53,7 @@ func (u *Game) ToResp() *GameResp {
 		Name:                   u.Name,
 		Description:            u.Description,
 		GuestsAllowed:          u.GuestsAllowed,
+		LobbySize:              u.LobbySize,
 		MatchmakingStrategy:    u.MatchmakingStrategy,
 		MatchmakingMachineName: u.MatchmakingMachineName,
 		ELOStrategy:            u.ELOStrategy,
@@ -61,6 +64,7 @@ type CreateGameParams struct {
 	Name                   string
 	Description            string
 	GuestsAllowed          bool
+	LobbySize              int
 	MatchmakingStrategy    string
 	MatchmakingMachineName string
 	ELOStrategy            string
@@ -80,6 +84,7 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		Name:                   params.Name,
 		Description:            params.Description,
 		GuestsAllowed:          params.GuestsAllowed,
+		LobbySize:              params.LobbySize,
 		MatchmakingStrategy:    params.MatchmakingStrategy,
 		MatchmakingMachineName: params.MatchmakingMachineName,
 		ELOStrategy:            params.ELOStrategy,

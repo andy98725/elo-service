@@ -4,11 +4,11 @@
 
 ## Matchmaking
 
-- [ ] Add Redis fly.io service
-- [ ] Add worker service
+- [x] Add Redis fly.io service
+- [x] Add worker service
 - [ ] Add websocket to join redis queue; streams status
 
-- [ ] Add 
+- [ ] Add Guest JWT, guest joining queue
 
 
 ## Matchmaking Usable

@@ -1,6 +1,7 @@
 package models
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
@@ -36,8 +37,13 @@ func (m *Match) ToResp() *MatchResp {
 		Status:      m.Status,
 	}
 }
+func (m *Match) ConnectionInfo() string {
+	return "TODO: Match found!"
+}
 
 func MatchStarted(gameID string, machineName string, authCode string, playerIDs []string) (*Match, error) {
+	slog.Debug("Match started", "gameID", gameID, "machineName", machineName, "authCode", authCode, "playerIDs", playerIDs)
+
 	match := &Match{
 		GameID:      gameID,
 		MachineName: machineName,

@@ -5,6 +5,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/labstack/echo"
@@ -15,18 +16,20 @@ import (
 
 type Server struct {
 	Config struct {
-		port string
+		port                string
+		WorkerSleepDuration time.Duration
 	}
-	Logger *slog.Logger
-	DB     *gorm.DB
-	Redis  *redis.Client
-	e      *echo.Echo
+	Logger   *slog.Logger
+	DB       *gorm.DB
+	Redis    *redis.Client
+	e        *echo.Echo
+	Shutdown chan struct{}
 }
 
 var S *Server
 
 func InitServer(e *echo.Echo) (Server, error) {
-	S = &Server{e: e}
+	S = &Server{e: e, Shutdown: make(chan struct{})}
 	S.Logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(S.Logger)
 
@@ -35,6 +38,12 @@ func InitServer(e *echo.Echo) (Server, error) {
 	}
 	if S.Config.port = os.Getenv("PORT"); S.Config.port == "" {
 		S.Config.port = "8080"
+	}
+
+	if workerSleep, err := time.ParseDuration(os.Getenv("WORKER_SLEEP_DURATION")); err == nil && workerSleep > 0 {
+		S.Config.WorkerSleepDuration = workerSleep
+	} else {
+		S.Config.WorkerSleepDuration = 1 * time.Second
 	}
 
 	// Redis
