@@ -1,9 +1,10 @@
 package api
 
 import (
-	"com/everlastinggames/elo/src/api/game"
-	"com/everlastinggames/elo/src/api/user"
 	"net/http"
+
+	"github.com/andy98725/elo-service/src/api/game"
+	"github.com/andy98725/elo-service/src/api/user"
 
 	"github.com/labstack/echo"
 )

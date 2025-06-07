@@ -1,10 +1,11 @@
 package models
 
 import (
-	"com/everlastinggames/elo/src/server"
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/andy98725/elo-service/src/server"
 
 	"golang.org/x/crypto/bcrypt"
 )

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"com/everlastinggames/elo/src/api"
-	"com/everlastinggames/elo/src/server"
+	"github.com/andy98725/elo-service/src/api"
+	"github.com/andy98725/elo-service/src/server"
 
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"

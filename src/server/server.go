@@ -28,7 +28,7 @@ func InitServer(e *echo.Echo) (Server, error) {
 	S.Logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	if err := godotenv.Load("config.env"); err != nil {
-		S.e.Logger.Warnf("Error loading .env file: %v", err)
+		S.e.Logger.Warnf("Error loading config.env file: %v", err)
 	}
 
 	if S.Config.port = os.Getenv("PORT"); S.Config.port == "" {
@@ -46,6 +46,7 @@ func InitServer(e *echo.Echo) (Server, error) {
 		return *S, err
 	}
 	S.DB = db
+	S.Logger.Info("Database connected")
 
 	return *S, nil
 }

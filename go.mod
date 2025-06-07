@@ -1,4 +1,4 @@
-module com/everlastinggames/elo
+module github.com/andy98725/elo-service
 
 go 1.23.1
 

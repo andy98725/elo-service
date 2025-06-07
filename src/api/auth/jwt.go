@@ -1,10 +1,11 @@
 package auth
 
 import (
-	"com/everlastinggames/elo/src/models"
 	"errors"
 	"os"
 	"time"
+
+	"github.com/andy98725/elo-service/src/models"
 
 	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"

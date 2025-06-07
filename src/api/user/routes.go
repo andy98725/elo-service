@@ -1,7 +1,7 @@
 package user
 
 import (
-	"com/everlastinggames/elo/src/api/auth"
+	"github.com/andy98725/elo-service/src/api/auth"
 
 	"github.com/labstack/echo"
 )
