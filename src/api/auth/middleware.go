@@ -1,10 +1,10 @@
 package auth
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/andy98725/elo-service/src/models"
-	"github.com/andy98725/elo-service/src/server"
 	"github.com/labstack/echo"
 )
 
@@ -30,7 +30,7 @@ func RequireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 		c.Set("username", claims.Username)
 		user, err := models.GetById(claims.UserID)
 		if err != nil {
-			server.S.Logger.Error("Error getting user", "error", err)
+			slog.Error("Error getting user", "error", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "Error getting user: "+err.Error())
 		}
 		c.Set("user", user)

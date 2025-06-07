@@ -1,14 +1,14 @@
 # TODO
 
-## MVP: Runnable locally w/ db
 
-- [ ] User creation routes
-- [ ] User auth routes
-- [ ] Game creation routes
-- [ ] Postman collection
-- [x] Dockerize
-- [x] Makefile
-- [x] Docker-compose for sql
+
+## Matchmaking
+
+- [ ] Add Redis fly.io service
+- [ ] Add worker service
+- [ ] Add websocket to join redis queue; streams status
+
+- [ ] Add 
 
 
 ## Matchmaking Usable

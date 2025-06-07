@@ -2,11 +2,11 @@ package auth
 
 import (
 	"errors"
+	"log/slog"
 	"os"
 	"time"
 
 	"github.com/andy98725/elo-service/src/models"
-	"github.com/andy98725/elo-service/src/server"
 
 	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"
@@ -27,19 +27,19 @@ type Claims struct {
 func Login(email, password string) (string, error) {
 	user, err := models.GetByEmail(email)
 	if err != nil {
-		server.S.Logger.Warn("Invalid email", "error", err)
+		slog.Warn("Invalid email", "error", err)
 		return "", errors.New(ERR_INVALID_CREDENTIALS)
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
 	if err != nil {
-		server.S.Logger.Warn("Invalid password", "error", err)
+		slog.Warn("Invalid password", "error", err)
 		return "", errors.New(ERR_INVALID_CREDENTIALS)
 	}
 
 	token, err := generateToken(user.ID, user.Username)
 	if err != nil {
-		server.S.Logger.Error("Token generation failed", "error", err)
+		slog.Error("Token generation failed", "error", err)
 		return "", err
 	}
 

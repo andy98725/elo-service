@@ -1,6 +1,7 @@
 package game
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,10 +22,10 @@ type CreateGameRequest struct {
 func CreateGame(ctx echo.Context) error {
 	req := new(CreateGameRequest)
 	if err := ctx.Bind(req); err != nil {
-		server.S.Logger.Warn("Error binding request", "error", err)
+		slog.Warn("Error binding request", "error", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request payload")
 	}
-	server.S.Logger.Info("Creating game", "game", req)
+	slog.Info("Creating game", "game", req)
 
 	user := ctx.Get("user").(*models.User)
 	game, err := models.CreateGame(models.CreateGameParams{
@@ -43,7 +44,7 @@ func CreateGame(ctx echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "game already exists")
 		}
 
-		server.S.Logger.Error("Error creating game", "error", err)
+		slog.Error("Error creating game", "error", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "error creating game")
 	}
 

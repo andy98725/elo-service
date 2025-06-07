@@ -2,11 +2,11 @@ package user
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/andy98725/elo-service/src/models"
-	"github.com/andy98725/elo-service/src/server"
 	"github.com/labstack/echo"
 )
 
@@ -44,7 +44,7 @@ func Register(ctx echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "user already exists")
 		}
 
-		server.S.Logger.Error("Error creating user", "error", err)
+		slog.Error("Error creating user", "error", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "error creating user")
 	}
 

@@ -2,6 +2,7 @@ package models
 
 import (
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
@@ -80,7 +81,7 @@ func GetByUsername(username string) (*User, error) {
 func GetByEmail(email string) (*User, error) {
 	var user User
 	result := server.S.DB.Where("email = ?", email).First(&user)
-	server.S.Logger.Info("User", "user", user)
+	slog.Info("User", "user", user)
 	return &user, result.Error
 }
 
