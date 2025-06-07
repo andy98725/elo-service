@@ -44,3 +44,4 @@ spec.yaml
 # Build and CI
 makefile
 *.toml
+docker-compose.yml

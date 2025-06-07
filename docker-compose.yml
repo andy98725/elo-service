@@ -6,10 +6,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DB_USERNAME=goserv
-      - DB_PASSWORD=gopass
-      - DATABASE_URL=postgres
-      - DATABASE_NAME=postgres
+      - DATABASE_URL=postgres://goserv:gopass@postgres:5432/postgres
     depends_on:
       - postgres
     networks:

@@ -1,7 +1,7 @@
 package server
 
 import (
-	"fmt"
+	"errors"
 	"log/slog"
 	"os"
 
@@ -34,16 +34,11 @@ func InitServer(e *echo.Echo) (Server, error) {
 	if S.Config.port = os.Getenv("PORT"); S.Config.port == "" {
 		S.Config.port = "8080"
 	}
+	if os.Getenv("DATABASE_URL") == "" {
+		return *S, errors.New("DATABASE_URL is not set")
+	}
 
-	dsn := fmt.Sprintf(
-		"host=%s user=%s password=%s dbname=%s port=5432 sslmode=disable",
-		os.Getenv("DATABASE_URL"),
-		os.Getenv("DB_USERNAME"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DATABASE_NAME"),
-	)
-
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{})
 	if err != nil {
 		return *S, err
 	}
