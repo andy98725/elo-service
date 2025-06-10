@@ -7,6 +7,7 @@ import (
 )
 
 func Migrate() error {
+	server.S.DB = server.S.DB.Debug()
 	if err := server.S.DB.AutoMigrate(&User{}); err != nil {
 		return err
 	}
