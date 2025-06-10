@@ -6,10 +6,10 @@ import (
 )
 
 func InitRoutes(e *echo.Echo) error {
-	e.POST("/games", CreateGame, auth.RequireAuth)
-	e.GET("/games", GetGames, auth.RequireAdmin)
-	e.GET("/games/:id", GetGame, auth.RequireAuth)
-	e.GET("/user/games", GetGamesOfUser, auth.RequireAuth)
+	e.POST("/game", CreateGame, auth.RequireAuth)
+	e.GET("/game", GetGames, auth.RequireAdmin)
+	e.GET("/game/:id", GetGame, auth.RequireAuth)
+	e.GET("/user/game", GetGamesOfUser, auth.RequireAuth)
 
 	return nil
 }

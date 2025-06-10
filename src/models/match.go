@@ -12,7 +12,6 @@ type Match struct {
 	GameID      string    `json:"game_id" gorm:"not null"`
 	Game        Game      `json:"game" gorm:"foreignKey:GameID"`
 	MachineName string    `json:"machine_name" gorm:"not null"`
-	PlayerIDs   []string  `json:"player_ids" gorm:"not null"`
 	Players     []User    `json:"players" gorm:"many2many:match_players;"`
 	AuthCode    string    `json:"auth_code" gorm:"not null"`
 	Status      string    `json:"status" gorm:"not null"`
@@ -21,19 +20,24 @@ type Match struct {
 }
 
 type MatchResp struct {
-	ID          string   `json:"id"`
-	GameID      string   `json:"game_id"`
-	MachineName string   `json:"machine_name"`
-	PlayerIDs   []string `json:"player_ids"`
-	Status      string   `json:"status"`
+	ID          string     `json:"id"`
+	GameID      string     `json:"game_id"`
+	MachineName string     `json:"machine_name"`
+	Players     []UserResp `json:"players"`
+	Status      string     `json:"status"`
 }
 
 func (m *Match) ToResp() *MatchResp {
+	players := make([]UserResp, len(m.Players))
+	for i, player := range m.Players {
+		players[i] = *player.ToResp()
+	}
+
 	return &MatchResp{
 		ID:          m.ID,
 		GameID:      m.GameID,
 		MachineName: m.MachineName,
-		PlayerIDs:   m.PlayerIDs,
+		Players:     players,
 		Status:      m.Status,
 	}
 }
@@ -44,10 +48,14 @@ func (m *Match) ConnectionInfo() string {
 func MatchStarted(gameID string, machineName string, authCode string, playerIDs []string) (*Match, error) {
 	slog.Debug("Match started", "gameID", gameID, "machineName", machineName, "authCode", authCode, "playerIDs", playerIDs)
 
+	players := make([]User, len(playerIDs))
+	for i, playerID := range playerIDs {
+		players[i] = User{ID: playerID}
+	}
 	match := &Match{
 		GameID:      gameID,
 		MachineName: machineName,
-		PlayerIDs:   playerIDs,
+		Players:     players,
 		AuthCode:    authCode,
 		Status:      "started",
 	}
@@ -62,18 +70,39 @@ func MatchStarted(gameID string, machineName string, authCode string, playerIDs 
 
 func GetMatch(matchID string) (*Match, error) {
 	var match Match
-	result := server.S.DB.First(&match, "id = ?", matchID)
+	result := server.S.DB.Preload("Players").First(&match, "id = ?", matchID)
 	if result.Error != nil {
 		return nil, result.Error
 	}
 	return &match, nil
 }
 
-func GetMatchesOfGame(gameID string) ([]Match, error) {
+func GetMatchesOfGame(gameID string, page, pageSize int) ([]Match, int, error) {
 	var matches []Match
-	result := server.S.DB.Find(&matches, "game_id = ?", gameID)
+	offset := page * pageSize
+	result := server.S.DB.Preload("Players").Offset(offset).Limit(pageSize).Find(&matches, "game_id = ?", gameID)
 	if result.Error != nil {
-		return nil, result.Error
+		return nil, -1, result.Error
 	}
-	return matches, nil
+
+	nextPage := page + 1
+	if result.RowsAffected < int64(pageSize) {
+		nextPage = -1
+	}
+	return matches, nextPage, nil
+}
+
+func GetMatches(page, pageSize int) ([]Match, int, error) {
+	var matches []Match
+	offset := page * pageSize
+	result := server.S.DB.Preload("Players").Offset(offset).Limit(pageSize).Find(&matches)
+	if result.Error != nil {
+		return nil, -1, result.Error
+	}
+
+	nextPage := page + 1
+	if result.RowsAffected < int64(pageSize) {
+		nextPage = -1
+	}
+	return matches, nextPage, nil
 }

@@ -7,7 +7,7 @@ import (
 )
 
 func Migrate() error {
-	if err := server.S.DB.AutoMigrate(&User{}, &Game{}); err != nil {
+	if err := server.S.DB.AutoMigrate(&User{}, &Game{}, &Match{}, &MatchResult{}); err != nil {
 		return err
 	}
 

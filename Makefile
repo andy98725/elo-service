@@ -1,6 +1,6 @@
 .PHONY: fresh up down build logs clean
 
-fresh: down build up logs
+run: down build up logs
 
 up:
 	docker-compose up -d
@@ -17,3 +17,13 @@ logs:
 clean:
 	docker-compose down -v
 	docker system prune -f 
+
+pg-local:
+	docker exec -it $$(docker ps -q -f name=postgres) psql -U goserv -d postgres
+redis-local:
+	redis-cli -h localhost -p 6379
+
+pg-stg:
+	fly postgres connect -a elo-service-stg-db
+redis-stg:
+	fly redis connect

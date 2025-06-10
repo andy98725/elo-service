@@ -2,9 +2,9 @@ package user
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/andy98725/elo-service/src/models"
+	"github.com/andy98725/elo-service/src/util"
 	"github.com/labstack/echo"
 )
 
@@ -23,25 +23,12 @@ func GetUser(ctx echo.Context) error {
 }
 
 func GetUsers(ctx echo.Context) error {
-	page := ctx.QueryParam("page")
-	pageSize := ctx.QueryParam("pageSize")
-	if page == "" {
-		page = "0"
-	}
-	if pageSize == "" {
-		pageSize = "10"
+	page, pageSize, err := util.ParsePagination(ctx)
+	if err != nil {
+		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
 	}
 
-	pageInt, err := strconv.Atoi(page)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid page param")
-	}
-	pageSizeInt, err := strconv.Atoi(pageSize)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid pageSize param")
-	}
-
-	users, nextPage, err := models.GetUsers(pageInt, pageSizeInt)
+	users, nextPage, err := models.GetUsers(page, pageSize)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "error getting users")
 	}

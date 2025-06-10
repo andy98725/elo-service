@@ -16,9 +16,12 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-func JoinQueue(ctx echo.Context) error {
+func JoinQueueWebsocket(ctx echo.Context) error {
 	user := ctx.Get("user").(*models.User)
-	gameID := ctx.Param("gameID")
+	gameID := ctx.QueryParam("gameID")
+	if gameID == "" {
+		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": "gameID is required"})
+	}
 
 	// Listen for match ready before joining queue
 	readyChan := make(chan matchmaking.QueueResult, 1)
@@ -36,29 +39,27 @@ func JoinQueue(ctx echo.Context) error {
 	}
 	defer conn.Close()
 
-	go func() {
-		for {
-			select {
-			case resp := <-readyChan:
-				if resp.Error != nil {
-					conn.WriteMessage(websocket.TextMessage, []byte(resp.Error.Error()))
-					return
-				}
-
-				match, err := models.GetMatch(resp.MatchID)
-				if err != nil {
-					conn.WriteMessage(websocket.TextMessage, []byte(err.Error()))
-					return
-				}
-
-				conn.WriteMessage(websocket.TextMessage, []byte(match.ConnectionInfo()))
-				return
-			case <-ctx.Request().Context().Done():
-				return
-			case <-server.S.Shutdown:
-				return
+	conn.WriteJSON(echo.Map{"status": "queue_joined"})
+	for {
+		select {
+		case resp := <-readyChan:
+			if resp.Error != nil {
+				conn.WriteJSON(echo.Map{"status": "error", "error": resp.Error.Error()})
+				return resp.Error
 			}
+
+			match, err := models.GetMatch(resp.MatchID)
+			if err != nil {
+				conn.WriteJSON(echo.Map{"status": "error", "error": err.Error()})
+				return err
+			}
+
+			conn.WriteJSON(echo.Map{"status": "match_found", "connectionInfo": match.ConnectionInfo()})
+			return nil
+		case <-ctx.Request().Context().Done():
+			return nil
+		case <-server.S.Shutdown:
+			return nil
 		}
-	}()
-	return nil
+	}
 }

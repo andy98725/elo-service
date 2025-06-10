@@ -8,6 +8,7 @@ import (
 
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
+	"github.com/andy98725/elo-service/src/util"
 	"github.com/labstack/echo"
 )
 
@@ -52,19 +53,12 @@ func CreateGame(ctx echo.Context) error {
 }
 
 func GetGames(ctx echo.Context) error {
-	page := ctx.QueryParam("page")
-	pageSize := ctx.QueryParam("pageSize")
-
-	pageInt, err := strconv.Atoi(page)
+	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid page param")
-	}
-	pageSizeInt, err := strconv.Atoi(pageSize)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "Invalid pageSize param")
+		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
 	}
 
-	games, nextPage, err := models.GetGames(pageInt, pageSizeInt)
+	games, nextPage, err := models.GetGames(page, pageSize)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Error getting games: "+err.Error())
 	}
