@@ -17,6 +17,16 @@ func Migrate() error {
 
 	m := gormigrate.New(server.S.DB, gormigrate.DefaultOptions, []*gormigrate.Migration{
 		{
+			ID: "initial_create_users",
+			Migrate: func(tx *gorm.DB) error {
+				// create the basic schema only
+				return tx.Migrator().CreateTable(&User{})
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Migrator().DropTable(&User{})
+			},
+		},
+		{
 			ID: "initial",
 			Migrate: func(tx *gorm.DB) error {
 				return tx.AutoMigrate(&User{}, &Game{}, &Match{}, &MatchResult{})
