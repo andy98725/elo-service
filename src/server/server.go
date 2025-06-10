@@ -58,7 +58,6 @@ func InitServer(e *echo.Echo) (Server, error) {
 	if os.Getenv("DATABASE_URL") == "" {
 		return *S, errors.New("DATABASE_URL is not set")
 	}
-	slog.Info("DATABASE_URL: " + os.Getenv("DATABASE_URL"))
 
 	db, err := gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{})
 	if err != nil {

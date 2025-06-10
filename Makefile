@@ -24,6 +24,6 @@ redis-local:
 	redis-cli -h localhost -p 6379
 
 pg-stg:
-	fly postgres connect -a elo-service-stg-db
+	fly postgres connect -a elo-service-stg-db -d elo_service
 redis-stg:
 	fly redis connect
