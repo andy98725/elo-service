@@ -27,12 +27,31 @@ func Migrate() error {
 			},
 		},
 		{
-			ID: "initial",
+			ID: "initial_create_games",
 			Migrate: func(tx *gorm.DB) error {
-				return tx.AutoMigrate(&User{}, &Game{}, &Match{}, &MatchResult{})
+				// create the basic schema only
+				return tx.Migrator().CreateTable(&Game{})
 			},
 			Rollback: func(tx *gorm.DB) error {
-				return tx.Migrator().DropTable(&User{}, &Game{}, &Match{}, &MatchResult{})
+				return tx.Migrator().DropTable(&Game{})
+			},
+		},
+		{
+			ID: "initial_create_matches",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Migrator().CreateTable(&Match{})
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Migrator().DropTable(&Match{})
+			},
+		},
+		{
+			ID: "initial_create_match_results",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.Migrator().CreateTable(&MatchResult{})
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.Migrator().DropTable(&MatchResult{})
 			},
 		},
 	})
