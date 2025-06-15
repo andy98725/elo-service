@@ -6,9 +6,10 @@
 
 - [x] Add Redis fly.io service
 - [x] Add worker service
-- [ ] Add websocket to join redis queue; streams status
+- [x] Add websocket to join redis queue; streams status
+- [x] Add Guest JWT, guest joining queue
+- [ ] Test guest route
 
-- [ ] Add Guest JWT, guest joining queue
 
 
 ## Matchmaking Usable

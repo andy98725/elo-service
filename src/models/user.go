@@ -35,6 +35,11 @@ func (u *User) ToResp() *UserResp {
 	}
 }
 
+type Guest struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+}
+
 type CreateUserParams struct {
 	Username string
 	Email    string

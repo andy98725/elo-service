@@ -7,12 +7,13 @@ import (
 )
 
 func InitRoutes(e *echo.Echo) error {
+	e.POST("/guest", GuestToken)
 	e.POST("/user", Register)
 	e.POST("/user/login", Login)
-	e.GET("/user", GetUser, auth.RequireAuth)
+	e.GET("/user", GetUser, auth.RequireUserAuth)
 	e.GET("/users", GetUsers, auth.RequireAdmin)
-	e.PUT("/user", UpdateUser, auth.RequireAuth)
-	e.DELETE("/user", DeleteUser, auth.RequireAuth)
+	e.PUT("/user", UpdateUser, auth.RequireUserAuth)
+	e.DELETE("/user", DeleteUser, auth.RequireUserAuth)
 
 	return nil
 }
