@@ -45,8 +45,13 @@ func (m *Match) ConnectionInfo() string {
 	return "TODO: Match found!"
 }
 
-func MatchStarted(gameID string, machineName string, authCode string, playerIDs []string) (*Match, error) {
-	slog.Debug("Match started", "gameID", gameID, "machineName", machineName, "authCode", authCode, "playerIDs", playerIDs)
+type MachineConnectionInfo struct {
+	MachineName string
+	AuthCode    string
+}
+
+func MatchStarted(gameID string, connInfo *MachineConnectionInfo, playerIDs []string) (*Match, error) {
+	slog.Info("Match started", "gameID", gameID, "connInfo", connInfo, "playerIDs", playerIDs)
 
 	players := make([]User, len(playerIDs))
 	for i, playerID := range playerIDs {
@@ -54,9 +59,9 @@ func MatchStarted(gameID string, machineName string, authCode string, playerIDs 
 	}
 	match := &Match{
 		GameID:      gameID,
-		MachineName: machineName,
 		Players:     players,
-		AuthCode:    authCode,
+		MachineName: connInfo.MachineName,
+		AuthCode:    connInfo.AuthCode,
 		Status:      "started",
 	}
 

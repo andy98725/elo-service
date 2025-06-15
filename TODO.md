@@ -1,28 +1,9 @@
 # TODO
 
 
-
-## Matchmaking
-
-- [x] Add Redis fly.io service
-- [x] Add worker service
-- [x] Add websocket to join redis queue; streams status
-- [x] Add Guest JWT, guest joining queue
+- [ ] Spawn fly machine on match start
+- [ ] Add results report route
+- [ ] Add demo game server, set as default
 - [ ] Test guest route
 
 
-
-## Matchmaking Usable
-
-- [ ] Game creation routes
-- [ ] Other datatypes matching spec.yaml
-- [ ] Accept websocket connections
-- [ ] Matchmaking logic
-
-## Deployment
-
-- [ ] Dockerize
-- [ ] CI/CD
-- [ ] Monitoring
-- [ ] Logging
-- [ ] Error Handling

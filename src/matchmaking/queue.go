@@ -8,7 +8,6 @@ import (
 
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
-	"github.com/google/uuid"
 )
 
 func JoinQueue(ctx context.Context, userID string, gameID string) error {
@@ -89,7 +88,13 @@ func PairPlayers(ctx context.Context) error {
 			}
 
 			// Create match
-			match, err := models.MatchStarted(gameID, game.MatchmakingMachineName, uuid.NewString(), players)
+			connInfo, err := SpawnMachine(gameID, players)
+			if err != nil {
+				return err
+			}
+
+			// Store match info
+			match, err := models.MatchStarted(gameID, connInfo, players)
 			if err != nil {
 				// If match creation fails, put players back in queue
 				server.S.Redis.RPush(ctx, key, players[0], players[1])
