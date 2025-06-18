@@ -15,4 +15,4 @@ RUN apk add --no-cache ca-certificates
 COPY --from=builder /app/main .
 COPY config.env .
 EXPOSE 8080
-CMD ["./main"] 
+ENTRYPOINT ["./main"] 

@@ -1,4 +1,4 @@
-.PHONY: fresh up down build logs clean example-run
+.PHONY: fresh up down build logs clean example-run example-push
 
 run: down build up logs
 
@@ -31,3 +31,8 @@ redis-stg:
 example-run:
 	cd example && docker build -t example-server .
 	docker run example-server -token "abc123" "player1" "player2"
+
+example-push:
+	cd example && docker build -t example-server .
+	docker tag example-server andy98725/example-server:latest
+	docker push andy98725/example-server:latest

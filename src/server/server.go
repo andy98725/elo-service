@@ -5,9 +5,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
-	"time"
 
-	"github.com/joho/godotenv"
 	"github.com/labstack/echo"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
@@ -15,10 +13,7 @@ import (
 )
 
 type Server struct {
-	Config struct {
-		port                string
-		WorkerSleepDuration time.Duration
-	}
+	Config   *Config
 	Logger   *slog.Logger
 	DB       *gorm.DB
 	Redis    *redis.Client
@@ -29,22 +24,16 @@ type Server struct {
 var S *Server
 
 func InitServer(e *echo.Echo) (Server, error) {
-	S = &Server{e: e, Shutdown: make(chan struct{})}
+	S = &Server{e: e}
+
+	S.Shutdown = make(chan struct{})
 	S.Logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(S.Logger)
-
-	if err := godotenv.Load("config.env"); err != nil {
-		slog.Warn("Error loading config.env file", "error", err)
+	cfg, err := InitConfig()
+	if err != nil {
+		return *S, err
 	}
-	if S.Config.port = os.Getenv("PORT"); S.Config.port == "" {
-		S.Config.port = "8080"
-	}
-
-	if workerSleep, err := time.ParseDuration(os.Getenv("WORKER_SLEEP_DURATION")); err == nil && workerSleep > 0 {
-		S.Config.WorkerSleepDuration = workerSleep
-	} else {
-		S.Config.WorkerSleepDuration = 1 * time.Second
-	}
+	S.Config = cfg
 
 	// Redis
 	opt, err := redis.ParseURL(os.Getenv("REDIS_URL"))
@@ -70,5 +59,5 @@ func InitServer(e *echo.Echo) (Server, error) {
 }
 
 func (s *Server) Start() {
-	s.e.Logger.Fatal(S.e.Start(":" + S.Config.port))
+	s.e.Logger.Fatal(S.e.Start(":" + S.Config.Port))
 }
