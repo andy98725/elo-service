@@ -17,6 +17,7 @@ var jwtKey = []byte(os.Getenv("JWT_SECRET_KEY"))
 
 const (
 	ERR_INVALID_CREDENTIALS = "invalid email or password"
+	JWT_TIMEOUT             = time.Hour * 24
 )
 
 type UserClaims struct {
@@ -39,12 +40,16 @@ func Login(email, displayName, password string) (string, error) {
 		return "", errors.New(ERR_INVALID_CREDENTIALS)
 	}
 
+	if displayName == "" {
+		displayName = user.Username
+	}
+
 	claims := &UserClaims{
 		UserID:      user.ID,
 		DisplayName: displayName,
 		Username:    user.Username,
 		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: time.Now().Add(time.Hour * 24).Unix(),
+			ExpiresAt: time.Now().Add(JWT_TIMEOUT).Unix(),
 		},
 	}
 
@@ -61,10 +66,10 @@ type GuestClaims struct {
 
 func GuestLogin(displayName string) (string, error) {
 	claims := &GuestClaims{
-		ID:          uuid.New().String(),
+		ID:          "g_" + uuid.New().String(),
 		DisplayName: displayName,
 		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: time.Now().Add(time.Hour * 24).Unix(),
+			ExpiresAt: time.Now().Add(JWT_TIMEOUT).Unix(),
 		},
 	}
 

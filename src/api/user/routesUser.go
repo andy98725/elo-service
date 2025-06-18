@@ -7,7 +7,7 @@ import (
 )
 
 func InitRoutes(e *echo.Echo) error {
-	e.POST("/guest", GuestToken)
+	e.POST("/guest/login", GuestToken)
 	e.POST("/user", Register)
 	e.POST("/user/login", Login)
 	e.GET("/user", GetUser, auth.RequireUserAuth)
