@@ -1,4 +1,4 @@
-.PHONY: fresh up down build logs clean
+.PHONY: fresh up down build logs clean example-run
 
 run: down build up logs
 
@@ -27,3 +27,7 @@ pg-stg:
 	fly postgres connect -a elo-service-stg-db -d elo_service
 redis-stg:
 	fly redis connect
+
+example-run:
+	cd example && docker build -t example-server .
+	docker run example-server -token "abc123" "player1" "player2"
