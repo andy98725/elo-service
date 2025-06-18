@@ -22,6 +22,7 @@ func GetUser(ctx echo.Context) error {
 	return ctx.JSON(200, user.ToResp())
 }
 
+// Admin only
 func GetUsers(ctx echo.Context) error {
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
@@ -33,12 +34,9 @@ func GetUsers(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "error getting users")
 	}
 
-	return ctx.JSON(200, struct {
-		Users    []models.User `json:"users"`
-		NextPage int           `json:"nextPage"`
-	}{
-		Users:    users,
-		NextPage: nextPage,
+	return ctx.JSON(200, echo.Map{
+		"users":    users,
+		"nextPage": nextPage,
 	})
 }
 

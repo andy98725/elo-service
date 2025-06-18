@@ -12,7 +12,7 @@ func InitRoutes(e *echo.Echo) error {
 	// CRUD
 	e.GET("/match/:matchID", GetMatch, auth.RequireUserAuth)
 	e.GET("/match/game/:gameID", GetMatchesOfGame, auth.RequireUserAuth)
-	e.GET("/match", GetMatches, auth.RequireUserAuth)
+	e.GET("/matches", GetMatches, auth.RequireAdmin)
 	e.GET("/result/:matchID", GetMatchResult, auth.RequireUserAuth)
 	e.GET("/result/game/:gameID", GetMatchResultsOfGame, auth.RequireUserAuth)
 	e.GET("/result", GetMatchResults, auth.RequireUserAuth)

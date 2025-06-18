@@ -37,6 +37,7 @@ func GetMatchesOfGame(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, echo.Map{"matches": matchesResp, "nextPage": nextPage})
 }
 
+// Admin only
 func GetMatches(ctx echo.Context) error {
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
@@ -48,12 +49,7 @@ func GetMatches(ctx echo.Context) error {
 		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}
 
-	matchesResp := make([]models.MatchResp, len(matches))
-	for i, match := range matches {
-		matchesResp[i] = *match.ToResp()
-	}
-
-	return ctx.JSON(http.StatusOK, echo.Map{"matches": matchesResp, "nextPage": nextPage})
+	return ctx.JSON(http.StatusOK, echo.Map{"matches": matches, "nextPage": nextPage})
 }
 
 func GetMatchResult(ctx echo.Context) error {

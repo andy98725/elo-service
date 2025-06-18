@@ -52,6 +52,7 @@ func CreateGame(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, game)
 }
 
+// Admin only
 func GetGames(ctx echo.Context) error {
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
@@ -62,13 +63,9 @@ func GetGames(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Error getting games: "+err.Error())
 	}
-	gamesResp := make([]models.GameResp, len(games))
-	for i, game := range games {
-		gamesResp[i] = *game.ToResp()
-	}
 
-	return ctx.JSON(http.StatusOK, map[string]interface{}{
-		"games":    gamesResp,
+	return ctx.JSON(http.StatusOK, echo.Map{
+		"games":    games,
 		"nextPage": nextPage,
 	})
 }
