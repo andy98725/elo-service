@@ -14,13 +14,13 @@ import (
 
 type RequestBody struct {
 	TokenID  string `json:"token_id"`
-	PlayerID string `json:"player_id"`
+	WinnerID string `json:"winner_id"`
 }
 
 func main() {
 	website := os.Getenv("WEBSITE_URL")
 	if website == "" {
-		website = "https://example.com"
+		website = "https://elo-service.fly.dev/result/report"
 	}
 
 	var tokenID string // Token ID is required
@@ -44,7 +44,7 @@ func main() {
 	winnerID := playerIDs[rand.Intn(len(playerIDs))]
 	jsonData, err := json.Marshal(RequestBody{
 		TokenID:  tokenID,
-		PlayerID: winnerID,
+		WinnerID: winnerID,
 	})
 	if err != nil {
 		log.Fatalf("Failed to marshal JSON: %v", err)

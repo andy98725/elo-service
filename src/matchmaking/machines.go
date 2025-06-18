@@ -2,6 +2,8 @@ package matchmaking
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,7 +11,6 @@ import (
 
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
-	"github.com/google/uuid"
 )
 
 const jsonTemplate = `{
@@ -36,11 +37,20 @@ func SpawnMachine(gameID string, playerIDs []string) (*models.MachineConnectionI
 	if err != nil {
 		return nil, err
 	}
-	authCode := uuid.NewString()
+
+	// Generate 32 random bytes and encode as hex for secure token
+	tokenBytes := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, tokenBytes); err != nil {
+		return nil, fmt.Errorf("failed to generate secure token: %w", err)
+	}
+	authCode := strings.ReplaceAll(hex.EncodeToString(tokenBytes), " ", "-")
+	authCode = strings.ReplaceAll(authCode, "/", "-")
 
 	playersStr := "\"" + strings.Join(playerIDs, "\", \"") + "\""
 	machineName := game.MatchmakingMachineName
-	machineName = "docker.io/andy98725/example-server:latest" //tmp
+	if machineName == "" {
+		machineName = "docker.io/andy98725/example-server:latest"
+	}
 	jsonData := fmt.Sprintf(jsonTemplate, authCode, playersStr, machineName)
 
 	// Create HTTP request
