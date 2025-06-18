@@ -61,14 +61,21 @@ func PairPlayers(ctx context.Context) error {
 
 	for _, key := range keys {
 		gameID := strings.TrimPrefix(key, "queue_")
-		slog.Debug("Pairing players", "gameID", gameID)
 
 		game, err := models.GetGame(gameID)
 		if err != nil {
-			continue // Skip this queue if game not found
+			slog.Warn("Game not found", "error", err, "gameID", gameID)
+			continue
+		}
+
+		qs, err := server.S.Redis.LLen(ctx, key).Result()
+		if err != nil {
+			slog.Error("Failed to get queue size", "error", err, "gameID", gameID)
+			continue
 		}
 
 		// Loop through queue until all players are matched
+		slog.Debug("Pairing players", "gameID", gameID, "queueSize", qs)
 		for queueSize, err := server.S.Redis.LLen(ctx, key).Result(); err == nil && queueSize >= int64(game.LobbySize); queueSize, err = server.S.Redis.LLen(ctx, key).Result() {
 			players, err := server.S.Redis.LPopCount(ctx, "queue_"+gameID, game.LobbySize).Result()
 			if err != nil {

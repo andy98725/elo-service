@@ -17,7 +17,7 @@ var upgrader = websocket.Upgrader{
 }
 
 func JoinQueueWebsocket(ctx echo.Context) error {
-	user := ctx.Get("user").(*models.User)
+	id := ctx.Get("id").(string)
 	gameID := ctx.QueryParam("gameID")
 	if gameID == "" {
 		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": "gameID is required"})
@@ -25,9 +25,9 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 
 	// Listen for match ready before joining queue
 	readyChan := make(chan matchmaking.QueueResult, 1)
-	matchmaking.NotifyOnReady(ctx.Request().Context(), user.ID, gameID, readyChan)
+	matchmaking.NotifyOnReady(ctx.Request().Context(), id, gameID, readyChan)
 
-	err := matchmaking.JoinQueue(ctx.Request().Context(), user.ID, gameID)
+	err := matchmaking.JoinQueue(ctx.Request().Context(), id, gameID)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}

@@ -21,13 +21,22 @@ func RequireUserOrGuestAuth(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 
 		if claims, err := ValidateUserToken(tokenString); err == nil {
-			c.Set("user", claims)
+			user, err := models.GetById(claims.UserID)
+			if err != nil {
+				slog.Error("Error getting user", "error", err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "Error getting user: "+err.Error())
+			}
+
+			c.Set("user", user)
 			c.Set("id", claims.UserID)
 			return next(c)
 		}
 
 		if claims, err := ValidateGuestToken(tokenString); err == nil {
-			c.Set("guest", claims)
+			c.Set("guest", models.Guest{
+				ID:          claims.ID,
+				DisplayName: claims.DisplayName,
+			})
 			c.Set("id", claims.ID)
 			return next(c)
 		}

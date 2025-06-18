@@ -8,6 +8,9 @@ services:
     environment:
       - DATABASE_URL=postgres://goserv:gopass@postgres:5432/postgres
       - REDIS_URL=redis://redis:6379
+      - FLY_API_KEY=${FLY_API_KEY}
+      - FLY_API_HOSTNAME=${FLY_API_HOSTNAME}
+      - FLY_APP_NAME=${FLY_APP_NAME}
     depends_on:
       - postgres
       - redis
