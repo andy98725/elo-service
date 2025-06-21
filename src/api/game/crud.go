@@ -117,3 +117,38 @@ func GetGamesOfUser(ctx echo.Context) error {
 		"nextPage": nextPage,
 	})
 }
+
+func UpdateGame(ctx echo.Context) error {
+	id := ctx.Param("id")
+	if id == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Game ID is required")
+	}
+
+	req := new(models.UpdateGameParams)
+	if err := ctx.Bind(req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request payload")
+	}
+
+	user := ctx.Get("user").(*models.User)
+	game, err := models.UpdateGame(id, *req, *user)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Error updating game: "+err.Error())
+	}
+
+	return ctx.JSON(http.StatusOK, game.ToResp())
+}
+
+func DeleteGame(ctx echo.Context) error {
+	id := ctx.Param("id")
+	if id == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Game ID is required")
+	}
+
+	user := ctx.Get("user").(*models.User)
+	err := models.DeleteGame(id, *user)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Error deleting game: "+err.Error())
+	}
+
+	return ctx.JSON(http.StatusOK, echo.Map{"message": "Game deleted successfully"})
+}

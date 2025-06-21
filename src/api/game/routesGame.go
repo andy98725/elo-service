@@ -10,6 +10,8 @@ func InitRoutes(e *echo.Echo) error {
 	e.GET("/games", GetGames, auth.RequireAdmin)
 	e.GET("/game/:id", GetGame, auth.RequireUserAuth)
 	e.GET("/user/game", GetGamesOfUser, auth.RequireUserAuth)
+	e.PUT("/game/:id", UpdateGame, auth.RequireUserAuth)
+	e.DELETE("/game/:id", DeleteGame, auth.RequireUserAuth)
 
 	return nil
 }

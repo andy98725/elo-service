@@ -124,3 +124,76 @@ func GetGame(id string) (*Game, error) {
 	result := server.S.DB.First(&game, "id = ?", id)
 	return &game, result.Error
 }
+
+type UpdateGameParams struct {
+	Name                   string `json:"name"`
+	Description            string `json:"description"`
+	GuestsAllowed          *bool  `json:"guests_allowed"`
+	LobbySize              int    `json:"lobby_size"`
+	MatchmakingStrategy    string `json:"matchmaking_strategy"`
+	MatchmakingMachineName string `json:"matchmaking_machine_name"`
+	ELOStrategy            string `json:"elo_strategy"`
+}
+
+func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
+	if params.MatchmakingStrategy != "" && !slices.Contains(MATCHMAKING_STRATEGIES, params.MatchmakingStrategy) {
+		return nil, errors.New("invalid matchmaking strategy: " + params.MatchmakingStrategy + " must be one of " + strings.Join(MATCHMAKING_STRATEGIES, ", "))
+	}
+	if params.ELOStrategy != "" && !slices.Contains(ELO_STRATEGIES, params.ELOStrategy) {
+		return nil, errors.New("invalid elo strategy: " + params.ELOStrategy + " must be one of " + strings.Join(ELO_STRATEGIES, ", "))
+	}
+
+	game, err := GetGame(id)
+	if err != nil {
+		return nil, err
+	}
+	if game.OwnerID != owner.ID {
+		return nil, errors.New("you are not the owner of this game")
+	}
+
+	if params.Name != "" {
+		game.Name = params.Name
+	}
+	if params.Description != "" {
+		game.Description = params.Description
+	}
+	if params.GuestsAllowed != nil {
+		game.GuestsAllowed = *params.GuestsAllowed
+	}
+	if params.LobbySize != 0 {
+		game.LobbySize = params.LobbySize
+	}
+	if params.MatchmakingStrategy != "" {
+		game.MatchmakingStrategy = params.MatchmakingStrategy
+	}
+	if params.MatchmakingMachineName != "" {
+		game.MatchmakingMachineName = params.MatchmakingMachineName
+	}
+	if params.ELOStrategy != "" {
+		game.ELOStrategy = params.ELOStrategy
+	}
+
+	result := server.S.DB.Save(game)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	return game, nil
+}
+
+func DeleteGame(id string, owner User) error {
+	game, err := GetGame(id)
+	if err != nil {
+		return err
+	}
+	if game.OwnerID != owner.ID {
+		return errors.New("you are not the owner of this game")
+	}
+
+	result := server.S.DB.Delete(game)
+	if result.Error != nil {
+		return result.Error
+	}
+
+	return nil
+}
