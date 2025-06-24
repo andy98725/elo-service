@@ -13,11 +13,14 @@ import (
 )
 
 type CreateGameRequest struct {
-	Name                string `json:"name"`
-	Description         string `json:"description"`
-	GuestsAllowed       bool   `json:"guests_allowed"`
-	MatchmakingStrategy string `json:"matchmaking_strategy"`
-	ELOStrategy         string `json:"elo_strategy"`
+	Name                    string  `json:"name"`
+	Description             string  `json:"description"`
+	GuestsAllowed           bool    `json:"guests_allowed"`
+	LobbySize               int     `json:"lobby_size"`
+	MatchmakingStrategy     string  `json:"matchmaking_strategy"`
+	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
+	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
+	ELOStrategy             string  `json:"elo_strategy"`
 }
 
 func CreateGame(ctx echo.Context) error {
@@ -30,11 +33,14 @@ func CreateGame(ctx echo.Context) error {
 
 	user := ctx.Get("user").(*models.User)
 	game, err := models.CreateGame(models.CreateGameParams{
-		Name:                req.Name,
-		Description:         req.Description,
-		GuestsAllowed:       req.GuestsAllowed,
-		MatchmakingStrategy: req.MatchmakingStrategy,
-		ELOStrategy:         req.ELOStrategy,
+		Name:                    req.Name,
+		Description:             req.Description,
+		GuestsAllowed:           req.GuestsAllowed,
+		LobbySize:               req.LobbySize,
+		MatchmakingStrategy:     req.MatchmakingStrategy,
+		MatchmakingMachineName:  req.MatchmakingMachineName,
+		MatchmakingMachinePorts: req.MatchmakingMachinePorts,
+		ELOStrategy:             req.ELOStrategy,
 	}, *user)
 	if err != nil {
 		errMsg := err.Error()

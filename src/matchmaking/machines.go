@@ -13,12 +13,20 @@ import (
 	"github.com/andy98725/elo-service/src/server"
 )
 
+const portTemplate = `{
+	"port": %d,
+	"handlers": [ "tcp", "udp", "https" ]
+}`
+
 const jsonTemplate = `{
 	"config": {
 		"init": {
 			"cmd": [ "-token", "%s", %s]
 		},
 		"image": "%s",
+		"services": [ {
+			"ports": [ %s ]
+		} ],
 		"auto_destroy": true,
 		"restart": {
 			"policy": "no"
@@ -51,7 +59,11 @@ func SpawnMachine(gameID string, playerIDs []string) (*models.MachineConnectionI
 	if machineName == "" {
 		machineName = "docker.io/andy98725/example-server:latest"
 	}
-	jsonData := fmt.Sprintf(jsonTemplate, authCode, playersStr, machineName)
+	ports := ""
+	for i := 0; i < 3; i++ {
+		ports += fmt.Sprintf(portTemplate, 25565+i) + ","
+	}
+	jsonData := fmt.Sprintf(jsonTemplate, authCode, playersStr, machineName, ports)
 
 	// Create HTTP request
 	url := fmt.Sprintf("%s/v1/apps/%s/machines", server.S.Config.FlyAPIHostname, server.S.Config.FlyAppName)
@@ -78,7 +90,7 @@ func SpawnMachine(gameID string, playerIDs []string) (*models.MachineConnectionI
 	}
 
 	return &models.MachineConnectionInfo{
-		MachineName: machineName,
-		AuthCode:    authCode,
+		ConnectionAddress: machineName, //TODO: Get connection address from fly.io API
+		AuthCode:          authCode,
 	}, nil
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
+	"github.com/lib/pq"
 )
 
 const (
@@ -27,67 +28,78 @@ type Game struct {
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 	// TODO separate into leaderboard if needed
-	GuestsAllowed          bool   `json:"guests_allowed" gorm:"default:true"`
-	LobbySize              int    `json:"lobby_size" gorm:"default:2"`
-	MatchmakingStrategy    string `json:"matchmaking_strategy" gorm:"not null"`
-	MatchmakingMachineName string `json:"matchmaking_machine_name" gorm:"not null"`
-	ELOStrategy            string `json:"elo_strategy" gorm:"not null"`
+	GuestsAllowed           bool          `json:"guests_allowed" gorm:"default:true"`
+	LobbySize               int           `json:"lobby_size" gorm:"default:2"`
+	MatchmakingStrategy     string        `json:"matchmaking_strategy" gorm:"not null"`
+	MatchmakingMachineName  string        `json:"matchmaking_machine_name" gorm:"not null"`
+	MatchmakingMachinePorts pq.Int64Array `json:"matchmaking_machine_ports" gorm:"type:integer[];default:'{}'"`
+	ELOStrategy             string        `json:"elo_strategy" gorm:"not null"`
 }
 
 type GameResp struct {
-	ID                     string `json:"id"`
-	OwnerID                string `json:"owner_id"`
-	Name                   string `json:"name"`
-	Description            string `json:"description"`
-	GuestsAllowed          bool   `json:"guests_allowed"`
-	LobbySize              int    `json:"lobby_size"`
-	MatchmakingStrategy    string `json:"matchmaking_strategy"`
-	MatchmakingMachineName string `json:"matchmaking_machine_name"`
-	ELOStrategy            string `json:"elo_strategy"`
+	ID                      string  `json:"id"`
+	OwnerID                 string  `json:"owner_id"`
+	Name                    string  `json:"name"`
+	Description             string  `json:"description"`
+	GuestsAllowed           bool    `json:"guests_allowed"`
+	LobbySize               int     `json:"lobby_size"`
+	MatchmakingStrategy     string  `json:"matchmaking_strategy"`
+	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
+	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
+	ELOStrategy             string  `json:"elo_strategy"`
 }
 
 func (u *Game) ToResp() *GameResp {
 	return &GameResp{
-		ID:                     u.ID,
-		OwnerID:                u.OwnerID,
-		Name:                   u.Name,
-		Description:            u.Description,
-		GuestsAllowed:          u.GuestsAllowed,
-		LobbySize:              u.LobbySize,
-		MatchmakingStrategy:    u.MatchmakingStrategy,
-		MatchmakingMachineName: u.MatchmakingMachineName,
-		ELOStrategy:            u.ELOStrategy,
+		ID:                      u.ID,
+		OwnerID:                 u.OwnerID,
+		Name:                    u.Name,
+		Description:             u.Description,
+		GuestsAllowed:           u.GuestsAllowed,
+		LobbySize:               u.LobbySize,
+		MatchmakingStrategy:     u.MatchmakingStrategy,
+		MatchmakingMachineName:  u.MatchmakingMachineName,
+		MatchmakingMachinePorts: []int64(u.MatchmakingMachinePorts),
+		ELOStrategy:             u.ELOStrategy,
 	}
 }
 
 type CreateGameParams struct {
-	Name                   string
-	Description            string
-	GuestsAllowed          bool
-	LobbySize              int
-	MatchmakingStrategy    string
-	MatchmakingMachineName string
-	ELOStrategy            string
+	Name                    string
+	Description             string
+	GuestsAllowed           bool
+	LobbySize               int
+	MatchmakingStrategy     string
+	MatchmakingMachineName  string
+	MatchmakingMachinePorts []int64
+	ELOStrategy             string
 }
 
 func CreateGame(params CreateGameParams, owner User) (*Game, error) {
+	if params.MatchmakingStrategy == "" {
+		params.MatchmakingStrategy = MATCHMAKING_STRATEGY_RANDOM
+	}
 	if !slices.Contains(MATCHMAKING_STRATEGIES, params.MatchmakingStrategy) {
 		return nil, errors.New("invalid matchmaking strategy: " + params.MatchmakingStrategy + " must be one of " + strings.Join(MATCHMAKING_STRATEGIES, ", "))
+	}
+	if params.ELOStrategy == "" {
+		params.ELOStrategy = ELO_STRATEGY_UNRANKED
 	}
 	if !slices.Contains(ELO_STRATEGIES, params.ELOStrategy) {
 		return nil, errors.New("invalid elo strategy: " + params.ELOStrategy + " must be one of " + strings.Join(ELO_STRATEGIES, ", "))
 	}
 
 	game := &Game{
-		OwnerID:                owner.ID,
-		Owner:                  owner,
-		Name:                   params.Name,
-		Description:            params.Description,
-		GuestsAllowed:          params.GuestsAllowed,
-		LobbySize:              params.LobbySize,
-		MatchmakingStrategy:    params.MatchmakingStrategy,
-		MatchmakingMachineName: params.MatchmakingMachineName,
-		ELOStrategy:            params.ELOStrategy,
+		OwnerID:                 owner.ID,
+		Owner:                   owner,
+		Name:                    params.Name,
+		Description:             params.Description,
+		GuestsAllowed:           params.GuestsAllowed,
+		LobbySize:               params.LobbySize,
+		MatchmakingStrategy:     params.MatchmakingStrategy,
+		MatchmakingMachineName:  params.MatchmakingMachineName,
+		MatchmakingMachinePorts: pq.Int64Array(params.MatchmakingMachinePorts),
+		ELOStrategy:             params.ELOStrategy,
 	}
 
 	result := server.S.DB.Create(game)
@@ -126,13 +138,14 @@ func GetGame(id string) (*Game, error) {
 }
 
 type UpdateGameParams struct {
-	Name                   string `json:"name"`
-	Description            string `json:"description"`
-	GuestsAllowed          *bool  `json:"guests_allowed"`
-	LobbySize              int    `json:"lobby_size"`
-	MatchmakingStrategy    string `json:"matchmaking_strategy"`
-	MatchmakingMachineName string `json:"matchmaking_machine_name"`
-	ELOStrategy            string `json:"elo_strategy"`
+	Name                    string  `json:"name"`
+	Description             string  `json:"description"`
+	GuestsAllowed           *bool   `json:"guests_allowed"`
+	LobbySize               int     `json:"lobby_size"`
+	MatchmakingStrategy     string  `json:"matchmaking_strategy"`
+	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
+	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
+	ELOStrategy             string  `json:"elo_strategy"`
 }
 
 func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
@@ -168,6 +181,9 @@ func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
 	}
 	if params.MatchmakingMachineName != "" {
 		game.MatchmakingMachineName = params.MatchmakingMachineName
+	}
+	if params.MatchmakingMachinePorts != nil {
+		game.MatchmakingMachinePorts = params.MatchmakingMachinePorts
 	}
 	if params.ELOStrategy != "" {
 		game.ELOStrategy = params.ELOStrategy

@@ -9,6 +9,7 @@ import (
 func InitRoutes(e *echo.Echo) error {
 	// Matchmaking
 	e.GET("/match/join", JoinQueueWebsocket, auth.RequireUserOrGuestAuth)
+	e.GET("/match/size", QueueSize, auth.RequireUserOrGuestAuth)
 	// CRUD
 	e.GET("/match/:matchID", GetMatch, auth.RequireUserAuth)
 	e.GET("/match/game/:gameID", GetMatchesOfGame, auth.RequireUserAuth)

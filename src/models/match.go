@@ -8,23 +8,25 @@ import (
 )
 
 type Match struct {
-	ID          string    `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	GameID      string    `json:"game_id" gorm:"not null"`
-	Game        Game      `json:"game" gorm:"foreignKey:GameID"`
-	MachineName string    `json:"machine_name" gorm:"not null"`
-	Players     []User    `json:"players" gorm:"many2many:match_players;"`
-	AuthCode    string    `json:"auth_code" gorm:"not null"`
-	Status      string    `json:"status" gorm:"not null"`
-	CreatedAt   time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt   time.Time `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	ID                string    `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	GameID            string    `json:"game_id" gorm:"not null"`
+	Game              Game      `json:"game" gorm:"foreignKey:GameID"`
+	ConnectionAddress string    `json:"connection_address" gorm:"not null"`
+	Players           []User    `json:"players" gorm:"many2many:match_players;"`
+	GuestIDs          []string  `json:"guest_ids" gorm:"not null"`
+	AuthCode          string    `json:"auth_code" gorm:"not null"`
+	Status            string    `json:"status" gorm:"not null"`
+	CreatedAt         time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt         time.Time `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 }
 
 type MatchResp struct {
-	ID          string     `json:"id"`
-	GameID      string     `json:"game_id"`
-	MachineName string     `json:"machine_name"`
-	Players     []UserResp `json:"players"`
-	Status      string     `json:"status"`
+	ID                string     `json:"id"`
+	GameID            string     `json:"game_id"`
+	ConnectionAddress string     `json:"connection_address"`
+	Players           []UserResp `json:"players"`
+	GuestIDs          []string   `json:"guest_ids"`
+	Status            string     `json:"status"`
 }
 
 func (m *Match) ToResp() *MatchResp {
@@ -34,42 +36,58 @@ func (m *Match) ToResp() *MatchResp {
 	}
 
 	return &MatchResp{
-		ID:          m.ID,
-		GameID:      m.GameID,
-		MachineName: m.MachineName,
-		Players:     players,
-		Status:      m.Status,
+		ID:                m.ID,
+		GameID:            m.GameID,
+		ConnectionAddress: m.ConnectionAddress,
+		Players:           players,
+		Status:            m.Status,
 	}
-}
-func (m *Match) ConnectionInfo() string {
-	return "TODO: Match found!"
 }
 
 type MachineConnectionInfo struct {
-	MachineName string
-	AuthCode    string
+	ConnectionAddress string
+	AuthCode          string
 }
 
 func MatchStarted(gameID string, connInfo *MachineConnectionInfo, playerIDs []string) (*Match, error) {
-	slog.Info("Match started", "gameID", gameID, "connInfo", connInfo, "playerIDs", playerIDs)
+	var users []User
+	var guestIDs []string
 
-	players := make([]User, len(playerIDs))
-	for i, playerID := range playerIDs {
-		players[i] = User{ID: playerID}
-	}
-	match := &Match{
-		GameID:      gameID,
-		Players:     players,
-		MachineName: connInfo.MachineName,
-		AuthCode:    connInfo.AuthCode,
-		Status:      "started",
-	}
-
-	result := server.S.DB.Create(match)
+	// Find all users that exist
+	result := server.S.DB.Where("id IN ?", playerIDs).Find(&users)
 	if result.Error != nil {
 		return nil, result.Error
 	}
 
+	// Add unfound IDs to guestIDs
+	for _, playerID := range playerIDs {
+		found := false
+		for _, user := range users {
+			if user.ID == playerID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			guestIDs = append(guestIDs, playerID)
+		}
+	}
+
+	match := &Match{
+		GameID:            gameID,
+		Players:           users,
+		GuestIDs:          guestIDs,
+		ConnectionAddress: connInfo.ConnectionAddress,
+		AuthCode:          connInfo.AuthCode,
+		Status:            "started",
+	}
+
+	result = server.S.DB.Create(match)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	slog.Info("Match started", "gameID", gameID, "connInfo", connInfo, "playerIDs", playerIDs)
 	return match, nil
 }
 

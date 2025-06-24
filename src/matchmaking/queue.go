@@ -10,23 +10,32 @@ import (
 	"github.com/andy98725/elo-service/src/server"
 )
 
-func JoinQueue(ctx context.Context, userID string, gameID string) error {
+func JoinQueue(ctx context.Context, playerID string, gameID string) (int64, error) {
 	game, err := models.GetGame(gameID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	queueKey := "queue_" + game.ID
-	server.S.Redis.RPush(ctx, queueKey, userID)
-	return nil
+	server.S.Redis.RPush(ctx, queueKey, playerID)
+	len, err := server.S.Redis.LLen(ctx, queueKey).Result()
+	if err != nil {
+		return 0, err
+	}
+	return len, nil
 }
 
-func LeaveQueue(ctx context.Context, userID string, gameID string) error {
+func QueueSize(ctx context.Context, gameID string) (int64, error) {
+	queueKey := "queue_" + gameID
+	return server.S.Redis.LLen(ctx, queueKey).Result()
+}
+
+func LeaveQueue(ctx context.Context, playerID string, gameID string) error {
 	game, err := models.GetGame(gameID)
 	if err != nil {
 		return err
 	}
-	server.S.Redis.LRem(ctx, "queue_"+game.ID, 1, userID)
+	server.S.Redis.LRem(ctx, "queue_"+game.ID, 1, playerID)
 
 	return nil
 }
@@ -36,9 +45,9 @@ type QueueResult struct {
 	Error   error
 }
 
-func NotifyOnReady(ctx context.Context, userID string, gameID string, resultChan chan QueueResult) {
+func NotifyOnReady(ctx context.Context, playerID string, gameID string, resultChan chan QueueResult) {
 	go func() {
-		pubsub := server.S.Redis.Subscribe(ctx, "match_ready_"+gameID+"__"+userID)
+		pubsub := server.S.Redis.Subscribe(ctx, "match_ready_"+gameID+"__"+playerID)
 		defer pubsub.Close()
 
 		for msg := range pubsub.Channel() {
@@ -48,7 +57,7 @@ func NotifyOnReady(ctx context.Context, userID string, gameID string, resultChan
 			}
 		}
 
-		resultChan <- QueueResult{Error: fmt.Errorf("user %s not found in queue", userID)}
+		resultChan <- QueueResult{Error: fmt.Errorf("player %s not found in queue", playerID)}
 	}()
 }
 

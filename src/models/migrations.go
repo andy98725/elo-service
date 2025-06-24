@@ -25,6 +25,15 @@ func Migrate() error {
 				return err
 			},
 		},
+		{
+			ID: "add_matchmaking_machine_ports",
+			Migrate: func(tx *gorm.DB) error {
+				return tx.AutoMigrate(&Game{})
+			},
+			Rollback: func(tx *gorm.DB) error {
+				return tx.AutoMigrate(&Game{})
+			},
+		},
 	})
 	if err := m.Migrate(); err != nil {
 		return err

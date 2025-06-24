@@ -27,7 +27,7 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 	readyChan := make(chan matchmaking.QueueResult, 1)
 	matchmaking.NotifyOnReady(ctx.Request().Context(), id, gameID, readyChan)
 
-	err := matchmaking.JoinQueue(ctx.Request().Context(), id, gameID)
+	size, err := matchmaking.JoinQueue(ctx.Request().Context(), id, gameID)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}
@@ -39,7 +39,7 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 	}
 	defer conn.Close()
 
-	conn.WriteJSON(echo.Map{"status": "queue_joined"})
+	conn.WriteJSON(echo.Map{"status": "queue_joined", "players_in_queue": size})
 	for {
 		select {
 		case resp := <-readyChan:
@@ -54,7 +54,7 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 				return err
 			}
 
-			conn.WriteJSON(echo.Map{"status": "match_found", "connectionInfo": match.ConnectionInfo()})
+			conn.WriteJSON(echo.Map{"status": "match_found", "server_address": match.ConnectionAddress})
 			return nil
 		case <-ctx.Request().Context().Done():
 			return nil
@@ -62,4 +62,17 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 			return nil
 		}
 	}
+}
+
+func QueueSize(ctx echo.Context) error {
+	gameID := ctx.QueryParam("gameID")
+	if gameID == "" {
+		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": "gameID is required"})
+	}
+
+	size, err := matchmaking.QueueSize(ctx.Request().Context(), gameID)
+	if err != nil {
+		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+	}
+	return ctx.JSON(http.StatusOK, echo.Map{"players_in_queue": size})
 }
