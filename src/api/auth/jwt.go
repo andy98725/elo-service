@@ -90,6 +90,16 @@ func ValidateUserToken(tokenString string) (*UserClaims, error) {
 		return nil, jwt.ErrSignatureInvalid
 	}
 
+	if claims.UserID == "" {
+		return nil, errors.New("missing user ID")
+	}
+	if claims.DisplayName == "" {
+		return nil, errors.New("missing display name")
+	}
+	if claims.Username == "" {
+		return nil, errors.New("missing username")
+	}
+
 	return claims, nil
 }
 func ValidateGuestToken(tokenString string) (*GuestClaims, error) {
@@ -103,6 +113,13 @@ func ValidateGuestToken(tokenString string) (*GuestClaims, error) {
 
 	if !token.Valid {
 		return nil, jwt.ErrSignatureInvalid
+	}
+
+	if claims.ID == "" {
+		return nil, errors.New("missing guest ID")
+	}
+	if claims.DisplayName == "" {
+		return nil, errors.New("missing display name")
 	}
 
 	return claims, nil
