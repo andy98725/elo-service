@@ -42,20 +42,29 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 		conn.WriteJSON(echo.Map{"status": "error", "error": err.Error()})
 		return nil
 	}
-	defer server.S.Redis.RemovePlayerFromQueue(ctx.Request().Context(), gameID, id)
 
 	// Start TTL refresh goroutine
 	ttlRefresh := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(matchmaking.QUEUE_REFRESH_INTERVAL)
 		defer ticker.Stop()
+
+		searchingTicker := time.NewTicker(5 * time.Second)
+		defer searchingTicker.Stop()
 
 		for {
 			select {
 			case <-ticker.C:
 				// Refresh TTL to keep player in queue
-				if err := server.S.Redis.RefreshPlayerQueueTTL(ctx.Request().Context(), gameID, id, 5*time.Minute); err != nil {
+				if err := server.S.Redis.RefreshPlayerQueueTTL(ctx.Request().Context(), gameID, id, matchmaking.QUEUE_TTL); err != nil {
 					slog.Warn("Failed to refresh player queue TTL", "error", err, "playerID", id, "gameID", gameID)
+				}
+			case <-searchingTicker.C:
+				// Send searching status and check if connection is still alive
+				if err := conn.WriteJSON(echo.Map{"status": "searching"}); err != nil {
+					close(ttlRefresh)
+					server.S.Redis.RemovePlayerFromQueue(ctx.Request().Context(), gameID, id)
+					return
 				}
 			case <-ctx.Request().Context().Done():
 				return
@@ -89,8 +98,10 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 			conn.WriteJSON(echo.Map{"status": "match_found", "server_address": match.ConnectionAddress})
 			return nil
 		case <-ctx.Request().Context().Done():
+			close(ttlRefresh)
 			return nil
 		case <-server.S.Shutdown:
+			close(ttlRefresh)
 			return nil
 		}
 	}
