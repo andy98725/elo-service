@@ -42,23 +42,19 @@ func (m *MatchResult) ToResp() *MatchResultResp {
 	}
 }
 
-func MatchEnded(matchID string, winnerID string) (*MatchResult, error) {
+func MatchEnded(matchID string, winnerID string, result string) (*MatchResult, error) {
 	match, err := GetMatch(matchID)
 	if err != nil {
 		return nil, err
-	}
-
-	resultTxt := "win"
-	if winnerID == "" {
-		resultTxt = "draw"
 	}
 
 	matchResult := &MatchResult{
 		GameID:   match.GameID,
 		Players:  match.Players,
 		WinnerID: winnerID,
-		Result:   resultTxt,
+		Result:   result,
 	}
+
 	// Report result and delete match in one transaction
 	err = server.S.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(matchResult).Error; err != nil {

@@ -47,7 +47,7 @@ type FlyMachineResponse struct {
 	ID string `json:"id"`
 }
 
-func SpawnMachine(gameID string, playerIDs []string) (*models.MachineConnectionInfo, error) {
+func StartMachine(gameID string, playerIDs []string) (*models.MachineConnectionInfo, error) {
 	game, err := models.GetGame(gameID)
 	if err != nil {
 		return nil, err
@@ -112,11 +112,36 @@ func SpawnMachine(gameID string, playerIDs []string) (*models.MachineConnectionI
 		return nil, fmt.Errorf("no machine ID in Fly.io API response")
 	}
 
-	httpURL := fmt.Sprintf("https://%s.fly.dev:8443/%s/{port}/", server.S.Config.FlyAppName, machineResp.ID)
-	tcpURL := fmt.Sprintf("tcp://%s.fly.dev:8082/%s/{port}/", server.S.Config.FlyAppName, machineResp.ID)
-
 	return &models.MachineConnectionInfo{
-		ConnectionAddress: `{"http": "` + httpURL + `", "tcp": "` + tcpURL + `"}`,
-		AuthCode:          authCode,
+		MachineName: machineResp.ID,
+		AuthCode:    authCode,
 	}, nil
+}
+
+func StopMachine(machineID string) error {
+	url := fmt.Sprintf("%s/v1/apps/%s/machines/%s", server.S.Config.FlyAPIHostname, server.S.Config.FlyAppName, machineID)
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+server.S.Config.FlyAPIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to make HTTP request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("fly.io API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
 }

@@ -16,7 +16,7 @@ type Server struct {
 	Config   *Config
 	Logger   *slog.Logger
 	DB       *gorm.DB
-	Redis    *redis.Client
+	Redis    *Redis
 	e        *echo.Echo
 	Shutdown chan struct{}
 }
@@ -40,7 +40,7 @@ func InitServer(e *echo.Echo) (Server, error) {
 	if err != nil {
 		log.Fatalf("Failed to parse Redis URL: %v", err)
 	}
-	S.Redis = redis.NewClient(opt)
+	S.Redis = NewRedis(opt)
 	slog.Info("Redis connected")
 
 	// Postgres DB

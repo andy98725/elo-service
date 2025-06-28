@@ -12,33 +12,34 @@ import (
 )
 
 func JoinQueue(ctx context.Context, playerID string, gameID string) (int64, error) {
-	game, err := models.GetGame(gameID)
+	_, err := models.GetGame(gameID)
 	if err != nil {
 		return 0, err
 	}
 
-	queueKey := "queue_" + game.ID
-	server.S.Redis.RPush(ctx, queueKey, playerID)
-	len, err := server.S.Redis.LLen(ctx, queueKey).Result()
-	if err != nil {
+	if err := server.S.Redis.AddPlayerToQueue(ctx, gameID, playerID); err != nil {
 		return 0, err
 	}
-	return len, nil
+
+	return server.S.Redis.GameQueueSize(ctx, gameID)
 }
 
 func QueueSize(ctx context.Context, gameID string) (int64, error) {
-	queueKey := "queue_" + gameID
-	return server.S.Redis.LLen(ctx, queueKey).Result()
+	_, err := models.GetGame(gameID)
+	if err != nil {
+		return 0, err
+	}
+
+	return server.S.Redis.GameQueueSize(ctx, gameID)
 }
 
 func LeaveQueue(ctx context.Context, playerID string, gameID string) error {
-	game, err := models.GetGame(gameID)
+	_, err := models.GetGame(gameID)
 	if err != nil {
 		return err
 	}
-	server.S.Redis.LRem(ctx, "queue_"+game.ID, 1, playerID)
 
-	return nil
+	return server.S.Redis.RemovePlayerFromQueue(ctx, gameID, playerID)
 }
 
 type QueueResult struct {
@@ -48,7 +49,7 @@ type QueueResult struct {
 
 func NotifyOnReady(ctx context.Context, playerID string, gameID string, resultChan chan QueueResult) {
 	go func() {
-		pubsub := server.S.Redis.Subscribe(ctx, "match_ready_"+gameID+"__"+playerID)
+		pubsub := server.S.Redis.WatchMatchReady(ctx, gameID, playerID)
 		defer pubsub.Close()
 
 		for msg := range pubsub.Channel() {
@@ -68,7 +69,7 @@ func NotifyOnReady(ctx context.Context, playerID string, gameID string, resultCh
 
 func PairPlayers(ctx context.Context) error {
 	// Get all queue keys
-	keys, err := server.S.Redis.Keys(ctx, "queue_*").Result()
+	keys, err := server.S.Redis.AllQueues(ctx)
 	if err != nil {
 		return err
 	}
@@ -82,7 +83,7 @@ func PairPlayers(ctx context.Context) error {
 			continue
 		}
 
-		qs, err := server.S.Redis.LLen(ctx, key).Result()
+		qs, err := server.S.Redis.GameQueueSize(ctx, gameID)
 		if err != nil {
 			slog.Error("Failed to get queue size", "error", err, "gameID", gameID)
 			continue
@@ -90,8 +91,8 @@ func PairPlayers(ctx context.Context) error {
 
 		// Loop through queue until all players are matched
 		slog.Debug("Pairing players", "gameID", gameID, "queueSize", qs)
-		for queueSize, err := server.S.Redis.LLen(ctx, key).Result(); err == nil && queueSize >= int64(game.LobbySize); queueSize, err = server.S.Redis.LLen(ctx, key).Result() {
-			players, err := server.S.Redis.LPopCount(ctx, "queue_"+gameID, game.LobbySize).Result()
+		for queueSize, err := server.S.Redis.GameQueueSize(ctx, gameID); err == nil && queueSize >= int64(game.LobbySize); queueSize, err = server.S.Redis.GameQueueSize(ctx, gameID) {
+			players, err := server.S.Redis.PopPlayersFromQueue(ctx, gameID, game.LobbySize)
 			if err != nil {
 				slog.Error("Failed to pop players from queue", "error", err, "gameID", gameID)
 				continue
@@ -99,21 +100,16 @@ func PairPlayers(ctx context.Context) error {
 
 			// If not enough players, put them back in queue
 			if len(players) < game.LobbySize {
-				// Convert []string to []interface{} for RPush
-				interfacePlayers := make([]interface{}, len(players))
-				for i, p := range players {
-					interfacePlayers[i] = p
-				}
-				server.S.Redis.RPush(ctx, key, interfacePlayers...)
+				server.S.Redis.PushPlayersToQueue(ctx, gameID, players)
 				continue
 			}
 
 			// Create match
-			connInfo, err := SpawnMachine(gameID, players)
+			connInfo, err := StartMachine(gameID, players)
 			if err != nil {
 				slog.Error("Failed to spawn machine", "error", err, "gameID", gameID, "players", players)
 				for _, player := range players {
-					server.S.Redis.Publish(ctx, "match_ready_"+gameID+"__"+player, "error:failed to spawn machine: "+err.Error())
+					server.S.Redis.PublishMatchReady(ctx, gameID, player, "error:failed to spawn machine: "+err.Error())
 				}
 				continue
 			}
@@ -123,13 +119,13 @@ func PairPlayers(ctx context.Context) error {
 			if err != nil {
 				slog.Error("Failed to create match", "error", err, "gameID", gameID, "players", players)
 				for _, player := range players {
-					server.S.Redis.Publish(ctx, "match_ready_"+gameID+"__"+player, "error:failed to create match: "+err.Error())
+					server.S.Redis.PublishMatchReady(ctx, gameID, player, "error:failed to create match: "+err.Error())
 				}
 				continue
 			}
 			// Notify players that they are ready
 			for _, player := range players {
-				server.S.Redis.Publish(ctx, "match_ready_"+gameID+"__"+player, "match_"+match.ID)
+				server.S.Redis.PublishMatchReady(ctx, gameID, player, "match_"+match.ID)
 			}
 		}
 	}

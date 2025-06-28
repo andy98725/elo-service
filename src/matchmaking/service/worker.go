@@ -12,17 +12,29 @@ import (
 // This can be moved to its own app eventually.
 // For now, it's just a simple worker that can be run locally.
 
-func RunWorker(shutdown chan struct{}) {
+func RunWorker(ctx context.Context, shutdown chan struct{}) {
 	slog.Info("Starting matchmaking worker")
+
+	matchmakingTicker := time.NewTicker(server.S.Config.MatchmakingInterval)
+	defer matchmakingTicker.Stop()
+	matchGCInterval := time.NewTicker(server.S.Config.MatchGCInterval)
+	defer matchGCInterval.Stop()
+
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case <-shutdown:
 			return
-		default:
-			time.Sleep(server.S.Config.WorkerSleepDuration)
-			err := matchmaking.PairPlayers(context.Background())
+		case <-matchmakingTicker.C:
+			err := matchmaking.PairPlayers(ctx)
 			if err != nil {
 				slog.Error("Failed to pair players", "error", err)
+			}
+		case <-matchGCInterval.C:
+			err := matchmaking.GarbageCollectMatches(ctx)
+			if err != nil {
+				slog.Error("Failed to garbage collect matches", "error", err)
 			}
 		}
 	}

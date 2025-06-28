@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"github.com/andy98725/elo-service/src/api"
 	mm "github.com/andy98725/elo-service/src/matchmaking/service"
 	"github.com/andy98725/elo-service/src/models"
@@ -40,7 +42,7 @@ func main() {
 	}
 
 	// Start worker
-	go mm.RunWorker(s.Shutdown)
+	go mm.RunWorker(context.Background(), s.Shutdown)
 
 	s.Start()
 }

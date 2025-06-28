@@ -11,7 +11,8 @@ import (
 
 type Config struct {
 	Port                string
-	WorkerSleepDuration time.Duration
+	MatchmakingInterval time.Duration
+	MatchGCInterval     time.Duration
 	FlyAPIHostname      string
 	FlyAPIKey           string
 	FlyAppName          string
@@ -41,10 +42,16 @@ func InitConfig() (*Config, error) {
 		return nil, fmt.Errorf("FLY_APP_NAME is not set")
 	}
 
-	if workerSleep, err := time.ParseDuration(os.Getenv("WORKER_SLEEP_DURATION")); err == nil && workerSleep > 0 {
-		cfg.WorkerSleepDuration = workerSleep
+	if matchmakingInterval, err := time.ParseDuration(os.Getenv("MATCHMAKING_INTERVAL")); err == nil && matchmakingInterval > 0 {
+		cfg.MatchmakingInterval = matchmakingInterval
 	} else {
-		cfg.WorkerSleepDuration = 1 * time.Second
+		cfg.MatchmakingInterval = 100 * time.Millisecond
+	}
+
+	if matchGCInterval, err := time.ParseDuration(os.Getenv("MATCH_GC_INTERVAL")); err == nil && matchGCInterval > 0 {
+		cfg.MatchGCInterval = matchGCInterval
+	} else {
+		cfg.MatchGCInterval = 1 * time.Minute
 	}
 
 	return cfg, nil
