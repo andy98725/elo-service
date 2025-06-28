@@ -26,12 +26,9 @@ func Migrate() error {
 			},
 		},
 		{
-			ID: "add_matchmaking_connection_address",
+			ID: "drop_match_machine_name",
 			Migrate: func(tx *gorm.DB) error {
-				if err := tx.AutoMigrate(&Match{}); err != nil {
-					return err
-				}
-				return tx.Model(&Match{}).Where("connection_address IS NULL").Update("connection_address", "").Error
+				return tx.Migrator().DropColumn(&Match{}, "machine_name")
 			},
 		},
 	})
