@@ -30,10 +30,10 @@ type Game struct {
 	// TODO separate into leaderboard if needed
 	GuestsAllowed           bool          `json:"guests_allowed" gorm:"default:true"`
 	LobbySize               int           `json:"lobby_size" gorm:"default:2"`
-	MatchmakingStrategy     string        `json:"matchmaking_strategy" gorm:"not null"`
-	MatchmakingMachineName  string        `json:"matchmaking_machine_name" gorm:"not null"`
+	MatchmakingStrategy     string        `json:"matchmaking_strategy" gorm:"default:'random'"`
+	MatchmakingMachineName  string        `json:"matchmaking_machine_name" gorm:"default:''"`
 	MatchmakingMachinePorts pq.Int64Array `json:"matchmaking_machine_ports" gorm:"type:integer[];default:'{}'"`
-	ELOStrategy             string        `json:"elo_strategy" gorm:"not null"`
+	ELOStrategy             string        `json:"elo_strategy" gorm:"default:'unranked'"`
 }
 
 type GameResp struct {
