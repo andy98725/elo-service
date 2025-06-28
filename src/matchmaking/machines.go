@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -40,6 +41,11 @@ const jsonTemplate = `{
 		}
 	}
 }`
+
+// FlyMachineResponse represents the response from Fly.io API when creating a machine
+type FlyMachineResponse struct {
+	ID string `json:"id"`
+}
 
 func SpawnMachine(gameID string, playerIDs []string) (*models.MachineConnectionInfo, error) {
 	game, err := models.GetGame(gameID)
@@ -96,8 +102,21 @@ func SpawnMachine(gameID string, playerIDs []string) (*models.MachineConnectionI
 
 	slog.Info("Spawned machine", "body", string(body))
 
+	// Parse the response to get the machine ID
+	var machineResp FlyMachineResponse
+	if err := json.Unmarshal(body, &machineResp); err != nil {
+		return nil, fmt.Errorf("failed to parse Fly.io API response: %w", err)
+	}
+
+	if machineResp.ID == "" {
+		return nil, fmt.Errorf("no machine ID in Fly.io API response")
+	}
+
+	httpURL := fmt.Sprintf("https://%s.fly.dev:8443/%s/{port}/", server.S.Config.FlyAppName, machineResp.ID)
+	tcpURL := fmt.Sprintf("tcp://%s.fly.dev:8082/%s/{port}/", server.S.Config.FlyAppName, machineResp.ID)
+
 	return &models.MachineConnectionInfo{
-		ConnectionAddress: machineName, //TODO: Get connection address from fly.io API
+		ConnectionAddress: `{"http": "` + httpURL + `", "tcp": "` + tcpURL + `"}`,
 		AuthCode:          authCode,
 	}, nil
 }

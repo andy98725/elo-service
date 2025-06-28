@@ -31,9 +31,9 @@ primary_region = 'sea'
 
   [[services.ports]]
     port = 8081
-    handlers = ["http"]
+    handlers = ["tls", "http"]
 
-  [[services.ports]]
+  [[services.ports]] #TODO remove this?
     port = 8443
     handlers = ["tls", "http"]
 
