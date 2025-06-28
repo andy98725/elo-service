@@ -48,9 +48,10 @@ func (m *Match) ToResp() *MatchResp {
 
 func (m *Match) ConnectionAddress() string {
 	httpURL := fmt.Sprintf("https://%s.fly.dev:8443/%s/{port}/", server.S.Config.FlyAppName, m.MachineName)
-	tcpURL := fmt.Sprintf("tcp://%s.fly.dev:8082/%s/{port}/", server.S.Config.FlyAppName, m.MachineName)
+	tcpURL := fmt.Sprintf("tcp://%s.fly.dev:8082", server.S.Config.FlyAppName)
+	tcpMessage := fmt.Sprintf("%s:{port}", m.MachineName)
 
-	return `{"http": "` + httpURL + `", "tcp": "` + tcpURL + `"}`
+	return `{"http": "` + httpURL + `", "tcpURL": "` + tcpURL + `", "tcpMessage": "` + tcpMessage + `"}`
 }
 
 type MachineConnectionInfo struct {
