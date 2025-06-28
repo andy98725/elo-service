@@ -27,4 +27,4 @@ COPY --from=builder /app/main .
 COPY --from=builder /app/game-server-proxy/game-server-proxy ./game-server-proxy
 COPY config.env .
 
-EXPOSE 8080 8082 8083 
+EXPOSE 8080 8081

@@ -25,12 +25,12 @@ primary_region = 'sea'
 # Proxy HTTP service
 [[services]]
   protocol = "tcp"
-  internal_port = 8082
+  internal_port = 8080
   processes = ["proxy"]
   force_https = true
 
   [[services.ports]]
-    port = 8080
+    port = 8081
     handlers = ["http"]
 
   [[services.ports]]
@@ -40,11 +40,11 @@ primary_region = 'sea'
 # Proxy TCP service
 [[services]]
   protocol = "tcp"
-  internal_port = 8083
+  internal_port = 8081
   processes = ["proxy"]
 
   [[services.ports]]
-    port = 8081
+    port = 8082
 
 # Main app VM
 [[vm]]
