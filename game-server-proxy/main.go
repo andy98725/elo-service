@@ -61,6 +61,9 @@ func (p *ProxyServer) Start() error {
 func (p *ProxyServer) startHTTPProxy() error {
 	router := mux.NewRouter()
 
+	// Health check endpoint
+	router.HandleFunc("/health", p.handleHealthCheck).Methods("GET")
+
 	// Handle all HTTP requests
 	router.PathPrefix("/").HandlerFunc(p.handleHTTPRequest)
 
@@ -201,6 +204,12 @@ func (p *ProxyServer) handleTCPConnection(clientConn net.Conn) {
 
 	// Wait for either direction to finish
 	<-ctx.Done()
+}
+
+func (p *ProxyServer) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"healthy","service":"game-server-proxy"}`))
 }
 
 func main() {
