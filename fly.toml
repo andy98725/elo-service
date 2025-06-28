@@ -45,7 +45,6 @@ primary_region = 'sea'
 
   [[services.ports]]
     port = 8081
-    handlers = ["tcp"]
 
 # Main app VM
 [[vm]]
