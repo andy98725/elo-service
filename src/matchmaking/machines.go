@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
@@ -21,6 +22,7 @@ const portTemplate = `{
 }`
 
 const jsonTemplate = `{
+	"name": "%s",
 	"config": {
 		"init": {
 			"cmd": [ "-token", "%s", %s]
@@ -61,10 +63,12 @@ func StartMachine(gameID string, playerIDs []string) (*models.MachineConnectionI
 	authCode := strings.ReplaceAll(hex.EncodeToString(tokenBytes), " ", "-")
 	authCode = strings.ReplaceAll(authCode, "/", "-")
 
+	machineName := fmt.Sprintf("%s-%d", game.Name, time.Now().Unix())
+
 	playersStr := "\"" + strings.Join(playerIDs, "\", \"") + "\""
-	machineName := game.MatchmakingMachineName
-	if machineName == "" {
-		machineName = "docker.io/andy98725/example-server:latest"
+	imageName := game.MatchmakingMachineName
+	if imageName == "" {
+		imageName = "docker.io/andy98725/example-server:latest"
 	}
 	ports := ""
 	for i, port := range game.MatchmakingMachinePorts {
@@ -73,7 +77,7 @@ func StartMachine(gameID string, playerIDs []string) (*models.MachineConnectionI
 		}
 		ports += fmt.Sprintf(portTemplate, port)
 	}
-	jsonData := fmt.Sprintf(jsonTemplate, authCode, playersStr, machineName, ports)
+	jsonData := fmt.Sprintf(jsonTemplate, machineName, authCode, playersStr, imageName, ports)
 
 	// Create HTTP request
 	url := fmt.Sprintf("%s/v1/apps/%s/machines", server.S.Config.FlyAPIHostname, server.S.Config.FlyAppName)

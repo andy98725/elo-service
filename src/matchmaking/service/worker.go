@@ -36,6 +36,10 @@ func RunWorker(ctx context.Context, shutdown chan struct{}) {
 			if err != nil {
 				slog.Error("Failed to garbage collect matches", "error", err)
 			}
+			err = matchmaking.CleanupExpiredPlayers(ctx)
+			if err != nil {
+				slog.Error("Failed to cleanup expired players", "error", err)
+			}
 		}
 	}
 }

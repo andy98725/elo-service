@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/andy98725/elo-service/src/api"
 	mm "github.com/andy98725/elo-service/src/matchmaking/service"
@@ -27,7 +31,6 @@ func main() {
 		e.Logger.Fatal(err)
 		panic(err)
 	}
-	defer close(s.Shutdown)
 
 	// Migrate database
 	if err = models.Migrate(); err != nil {
@@ -43,6 +46,22 @@ func main() {
 
 	// Start worker
 	go mm.RunWorker(context.Background(), s.Shutdown)
+	// Start server
+	go e.Start(":" + s.Config.Port)
 
-	s.Start()
+	// Wait for interrupt signal to gracefully shutdown the server
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	<-quit
+	e.Logger.Info("Shutting down server...")
+	close(s.Shutdown)
+
+	// Give components time to clean up
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := e.Shutdown(ctx); err != nil {
+		e.Logger.Fatal(err)
+	}
 }

@@ -53,3 +53,42 @@ func GarbageCollectMatches(ctx context.Context) error {
 
 	return nil
 }
+
+func CleanupExpiredPlayers(ctx context.Context) error {
+	keys, err := server.S.Redis.AllQueues(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, key := range keys {
+		gameID := strings.TrimPrefix(key, "queue_")
+
+		// Get all players in the queue
+		players, err := server.S.Redis.AllPlayersInQueue(ctx, gameID)
+		if err != nil {
+			return err
+		}
+
+		// Check each player's TTL key
+		for _, playerID := range players {
+			alive, err := server.S.Redis.IsPlayerConnectionAlive(ctx, gameID, playerID)
+			if err != nil {
+				slog.Info("Failed to check player queue status", "playerID", playerID, "gameID", gameID)
+				continue
+			}
+
+			if !alive {
+				// Player's TTL has expired, remove them from the queue
+				if err := server.S.Redis.RemovePlayerFromQueue(ctx, gameID, playerID); err != nil {
+					slog.Error("Failed to remove expired player from queue", "playerID", playerID, "gameID", gameID)
+				} else {
+					slog.Info("Removed expired player from queue", "playerID", playerID, "gameID", gameID)
+				}
+			}
+		}
+
+		return nil
+	}
+
+	return nil
+}

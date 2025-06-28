@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
@@ -17,7 +18,9 @@ func JoinQueue(ctx context.Context, playerID string, gameID string) (int64, erro
 		return 0, err
 	}
 
-	if err := server.S.Redis.AddPlayerToQueue(ctx, gameID, playerID); err != nil {
+	// Use TTL version for automatic cleanup after 5 minutes
+	// TTL will be refreshed every 30 seconds while websocket is active
+	if err := server.S.Redis.AddPlayerToQueueWithTTL(ctx, gameID, playerID, 5*time.Minute); err != nil {
 		return 0, err
 	}
 

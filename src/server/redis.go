@@ -32,6 +32,27 @@ func (r *Redis) AddPlayerToQueue(ctx context.Context, gameID string, playerID st
 	return ErrPlayerAlreadyInQueue
 }
 
+// AddPlayerToQueueWithTTL adds a player to the queue with individual TTL
+// Uses separate keys for each player to allow per-player TTL management
+func (r *Redis) AddPlayerToQueueWithTTL(ctx context.Context, gameID string, playerID string, ttl time.Duration) error {
+	// Check if player is already in queue
+	_, err := r.Client.LPos(ctx, "queue_"+gameID, playerID, redis.LPosArgs{}).Result()
+	if err == redis.Nil {
+		// Player not found in queue, safe to add
+		pipe := r.Client.Pipeline()
+		pipe.RPush(ctx, "queue_"+gameID, playerID)
+		// Set individual TTL for this player
+		pipe.Set(ctx, "player_queue_"+gameID+"_"+playerID, "1", ttl)
+		_, err := pipe.Exec(ctx)
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	// Player found in queue
+	return ErrPlayerAlreadyInQueue
+}
+
 func (r *Redis) RemovePlayerFromQueue(ctx context.Context, gameID string, playerID string) error {
 	_, err := r.Client.LPos(ctx, "queue_"+gameID, playerID, redis.LPosArgs{}).Result()
 	if err == redis.Nil {
@@ -42,7 +63,30 @@ func (r *Redis) RemovePlayerFromQueue(ctx context.Context, gameID string, player
 		return err
 	}
 	// Player found in queue, safe to remove
-	return r.Client.LRem(ctx, "queue_"+gameID, 1, playerID).Err()
+	pipe := r.Client.Pipeline()
+	pipe.LRem(ctx, "queue_"+gameID, 1, playerID)
+	// Also remove the individual player TTL key
+	pipe.Del(ctx, "player_queue_"+gameID+"_"+playerID)
+	_, err = pipe.Exec(ctx)
+	return err
+}
+
+// RefreshPlayerQueueTTL extends the TTL for a specific player in the queue
+func (r *Redis) RefreshPlayerQueueTTL(ctx context.Context, gameID string, playerID string, ttl time.Duration) error {
+	return r.Client.Expire(ctx, "player_queue_"+gameID+"_"+playerID, ttl).Err()
+}
+
+// IsPlayerConnectionAlive checks if a player is still in queue by checking their TTL key
+func (r *Redis) IsPlayerConnectionAlive(ctx context.Context, gameID string, playerID string) (bool, error) {
+	exists, err := r.Client.Exists(ctx, "player_queue_"+gameID+"_"+playerID).Result()
+	if err != nil {
+		return false, err
+	}
+	return exists > 0, nil
+}
+
+func (r *Redis) AllPlayersInQueue(ctx context.Context, gameID string) ([]string, error) {
+	return r.Client.LRange(ctx, "queue_"+gameID, 0, -1).Result()
 }
 
 func (r *Redis) PopPlayersFromQueue(ctx context.Context, gameID string, count int) ([]string, error) {
