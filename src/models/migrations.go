@@ -26,16 +26,19 @@ func Migrate() error {
 			},
 		},
 		{
-			ID: "add_matchmaking_machine_ports",
+			ID: "add_matchmaking_connection_address",
 			Migrate: func(tx *gorm.DB) error {
-				return tx.AutoMigrate(&Game{})
-			},
-			Rollback: func(tx *gorm.DB) error {
-				return tx.AutoMigrate(&Game{})
+				if err := tx.AutoMigrate(&Match{}); err != nil {
+					return err
+				}
+				return tx.Model(&Match{}).Where("connection_address IS NULL").Update("connection_address", "").Error
 			},
 		},
 	})
 	if err := m.Migrate(); err != nil {
+		return err
+	}
+	if err := server.S.DB.AutoMigrate(&User{}, &Game{}, &Match{}, &MatchResult{}); err != nil {
 		return err
 	}
 

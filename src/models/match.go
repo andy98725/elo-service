@@ -5,19 +5,20 @@ import (
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
+	"github.com/lib/pq"
 )
 
 type Match struct {
-	ID                string    `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	GameID            string    `json:"game_id" gorm:"not null"`
-	Game              Game      `json:"game" gorm:"foreignKey:GameID"`
-	ConnectionAddress string    `json:"connection_address" gorm:"not null"`
-	Players           []User    `json:"players" gorm:"many2many:match_players;"`
-	GuestIDs          []string  `json:"guest_ids" gorm:"not null"`
-	AuthCode          string    `json:"auth_code" gorm:"not null"`
-	Status            string    `json:"status" gorm:"not null"`
-	CreatedAt         time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt         time.Time `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	ID                string         `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	GameID            string         `json:"game_id" gorm:"not null"`
+	Game              Game           `json:"game" gorm:"foreignKey:GameID"`
+	ConnectionAddress string         `json:"connection_address" gorm:""`
+	Players           []User         `json:"players" gorm:"many2many:match_players;"`
+	GuestIDs          pq.StringArray `json:"guest_ids" gorm:"type:text[];default:'{}'"`
+	AuthCode          string         `json:"auth_code" gorm:"not null"`
+	Status            string         `json:"status" gorm:"not null"`
+	CreatedAt         time.Time      `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt         time.Time      `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 }
 
 type MatchResp struct {
@@ -53,23 +54,12 @@ func MatchStarted(gameID string, connInfo *MachineConnectionInfo, playerIDs []st
 	var users []User
 	var guestIDs []string
 
-	// Find all users that exist
-	result := server.S.DB.Where("id IN ?", playerIDs).Find(&users)
-	if result.Error != nil {
-		return nil, result.Error
-	}
-
-	// Add unfound IDs to guestIDs
+	// Split players and guests based on ID prefix
 	for _, playerID := range playerIDs {
-		found := false
-		for _, user := range users {
-			if user.ID == playerID {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if len(playerID) > 2 && playerID[:2] == "g_" {
 			guestIDs = append(guestIDs, playerID)
+		} else {
+			users = append(users, User{ID: playerID})
 		}
 	}
 
@@ -82,7 +72,7 @@ func MatchStarted(gameID string, connInfo *MachineConnectionInfo, playerIDs []st
 		Status:            "started",
 	}
 
-	result = server.S.DB.Create(match)
+	result := server.S.DB.Create(match)
 	if result.Error != nil {
 		return nil, result.Error
 	}

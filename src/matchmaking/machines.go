@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -15,7 +16,7 @@ import (
 
 const portTemplate = `{
 	"port": %d,
-	"handlers": [ "tcp", "udp", "https" ]
+	"handlers": [ "tls", "http" ]
 }`
 
 const jsonTemplate = `{
@@ -60,8 +61,11 @@ func SpawnMachine(gameID string, playerIDs []string) (*models.MachineConnectionI
 		machineName = "docker.io/andy98725/example-server:latest"
 	}
 	ports := ""
-	for i := 0; i < 3; i++ {
-		ports += fmt.Sprintf(portTemplate, 25565+i) + ","
+	for i, port := range game.MatchmakingMachinePorts {
+		if i > 0 {
+			ports += ","
+		}
+		ports += fmt.Sprintf(portTemplate, port)
 	}
 	jsonData := fmt.Sprintf(jsonTemplate, authCode, playersStr, machineName, ports)
 
@@ -81,13 +85,16 @@ func SpawnMachine(gameID string, playerIDs []string) (*models.MachineConnectionI
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read response body: %w", err)
-		}
 		return nil, fmt.Errorf("fly.io API returned status %d: %s", resp.StatusCode, string(body))
 	}
+
+	slog.Info("Spawned machine", "body", string(body))
 
 	return &models.MachineConnectionInfo{
 		ConnectionAddress: machineName, //TODO: Get connection address from fly.io API

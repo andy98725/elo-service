@@ -2,6 +2,7 @@ package matchmaking
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -51,6 +52,10 @@ func NotifyOnReady(ctx context.Context, playerID string, gameID string, resultCh
 		defer pubsub.Close()
 
 		for msg := range pubsub.Channel() {
+			if strings.HasPrefix(msg.Payload, "error:") {
+				resultChan <- QueueResult{Error: errors.New(strings.TrimPrefix(msg.Payload, "error:"))}
+				return
+			}
 			if strings.HasPrefix(msg.Payload, "match_") {
 				resultChan <- QueueResult{MatchID: strings.TrimPrefix(msg.Payload, "match_")}
 				return
@@ -106,16 +111,21 @@ func PairPlayers(ctx context.Context) error {
 			// Create match
 			connInfo, err := SpawnMachine(gameID, players)
 			if err != nil {
-				return err
+				slog.Error("Failed to spawn machine", "error", err, "gameID", gameID, "players", players)
+				for _, player := range players {
+					server.S.Redis.Publish(ctx, "match_ready_"+gameID+"__"+player, "error:failed to spawn machine: "+err.Error())
+				}
+				continue
 			}
 
 			// Store match info
 			match, err := models.MatchStarted(gameID, connInfo, players)
 			if err != nil {
-				// If match creation fails, put players back in queue
-				server.S.Redis.RPush(ctx, key, players[0], players[1])
 				slog.Error("Failed to create match", "error", err, "gameID", gameID, "players", players)
-				break
+				for _, player := range players {
+					server.S.Redis.Publish(ctx, "match_ready_"+gameID+"__"+player, "error:failed to create match: "+err.Error())
+				}
+				continue
 			}
 			// Notify players that they are ready
 			for _, player := range players {
