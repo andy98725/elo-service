@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -146,24 +147,28 @@ func (p *ProxyServer) handleHTTPRequest(w http.ResponseWriter, r *http.Request) 
 	proxy.ServeHTTP(w, r)
 }
 
+// handleTCPConnection handles incoming TCP connections by proxying them to the appropriate game server.
+// It reads the initial data from the client in a simple string format: "machineID:port"
+// The connection is then proxied to {machineID}.vm.{appName}.internal:{port}.
+// If any errors occur during connection setup or proxying, an error message is sent back to the client
+// and the connection is closed.
 func (p *ProxyServer) handleTCPConnection(clientConn net.Conn) {
 	defer clientConn.Close()
 
-	// Read the first few bytes to determine the target
-	// We'll use a simple protocol: first 4 bytes for machine ID length, then machine ID, then 2 bytes for port
-	buffer := make([]byte, 1024)
-	n, err := clientConn.Read(buffer)
+	reader := bufio.NewReader(clientConn)
+	data, err := reader.ReadString('\n')
 	if err != nil {
 		p.logger.Errorf("Failed to read from client: %v", err)
+		clientConn.Write([]byte(fmt.Sprintf("Error reading from client: %v", err)))
 		return
 	}
 
-	// For simplicity, we'll use a simple format: "machineID:port"
-	// In a real implementation, you might want a more sophisticated protocol
-	data := string(buffer[:n])
-	parts := strings.Split(data, ":")
+	// Parse the machineID:port format
+	parts := strings.Split(strings.TrimSpace(data), ":")
 	if len(parts) < 2 {
-		p.logger.Error("Invalid TCP connection format. Expected: machineID:port")
+		errMsg := "Invalid TCP connection format. Expected: machineID:port"
+		p.logger.Error(errMsg)
+		clientConn.Write([]byte(errMsg))
 		return
 	}
 
@@ -172,7 +177,9 @@ func (p *ProxyServer) handleTCPConnection(clientConn net.Conn) {
 
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
-		p.logger.Errorf("Invalid port number: %s", portStr)
+		errMsg := fmt.Sprintf("Invalid port number: %s", portStr)
+		p.logger.Error(errMsg)
+		clientConn.Write([]byte(errMsg))
 		return
 	}
 
@@ -180,7 +187,9 @@ func (p *ProxyServer) handleTCPConnection(clientConn net.Conn) {
 	targetHost := fmt.Sprintf("%s.vm.%s.internal:%d", machineID, p.appName, port)
 	targetConn, err := net.DialTimeout("tcp", targetHost, 10*time.Second)
 	if err != nil {
-		p.logger.Errorf("Failed to connect to target %s: %v", targetHost, err)
+		errMsg := fmt.Sprintf("Failed to connect to target %s: %v", targetHost, err)
+		p.logger.Error(errMsg)
+		clientConn.Write([]byte(errMsg))
 		return
 	}
 	defer targetConn.Close()
@@ -193,12 +202,16 @@ func (p *ProxyServer) handleTCPConnection(clientConn net.Conn) {
 
 	// Start bidirectional copying
 	go func() {
-		io.Copy(targetConn, clientConn)
+		if _, err := io.Copy(targetConn, clientConn); err != nil {
+			p.logger.Errorf("Error copying client->target: %v", err)
+		}
 		cancel()
 	}()
 
 	go func() {
-		io.Copy(clientConn, targetConn)
+		if _, err := io.Copy(clientConn, targetConn); err != nil {
+			p.logger.Errorf("Error copying target->client: %v", err)
+		}
 		cancel()
 	}()
 

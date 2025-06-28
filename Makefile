@@ -29,10 +29,12 @@ redis-stg:
 	fly redis connect
 
 example-run:
-	cd example && docker build -t example-server .
-	docker run example-server -token "abc123" "player1" "player2"
+	cd example-game-server && docker build -t example-server .
+	docker run -p 8080:8080 -p 8081:8081 example-server -token "abc123" "player1" "player2"
+	# To query health: curl http://localhost:8080/health
+	# To join players: curl -X POST http://localhost:8080/join -H "Content-Type: text/plain" -d "player1"
 
 example-push:
-	cd example && docker build -t example-server .
+	cd example-game-server && docker build -t example-server .
 	docker tag example-server andy98725/example-server:latest
 	docker push andy98725/example-server:latest
