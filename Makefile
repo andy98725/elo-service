@@ -1,6 +1,6 @@
 .PHONY: fresh up down build logs clean example-run example-push
 
-run: down build up logs
+fresh: down build up logs
 
 up:
 	docker-compose up -d

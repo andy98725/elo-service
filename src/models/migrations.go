@@ -28,7 +28,8 @@ func Migrate() error {
 		{
 			ID: "drop_match_machine_name",
 			Migrate: func(tx *gorm.DB) error {
-				return tx.Migrator().DropColumn(&Match{}, "machine_name")
+				tx.Migrator().DropColumn(&Match{}, "machine_name")
+				return nil
 			},
 		},
 	})

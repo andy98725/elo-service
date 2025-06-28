@@ -1,6 +1,7 @@
 package match
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/andy98725/elo-service/src/matchmaking"
@@ -17,10 +18,17 @@ var upgrader = websocket.Upgrader{
 }
 
 func JoinQueueWebsocket(ctx echo.Context) error {
+	conn, err := upgrader.Upgrade(ctx.Response(), ctx.Request(), nil)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
 	id := ctx.Get("id").(string)
 	gameID := ctx.QueryParam("gameID")
 	if gameID == "" {
-		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": "gameID is required"})
+		conn.WriteJSON(echo.Map{"status": "error", "error": "gameID is required"})
+		return nil
 	}
 
 	// Listen for match ready before joining queue
@@ -29,16 +37,12 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 
 	size, err := matchmaking.JoinQueue(ctx.Request().Context(), id, gameID)
 	if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+		slog.Warn("Failed to join queue", "error", err)
+		conn.WriteJSON(echo.Map{"status": "error", "error": err.Error()})
+		return nil
 	}
 
 	// Queue is joined, now we need to wait for the match to start
-	conn, err := upgrader.Upgrade(ctx.Response(), ctx.Request(), nil)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
 	conn.WriteJSON(echo.Map{"status": "queue_joined", "players_in_queue": size})
 	for {
 		select {

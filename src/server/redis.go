@@ -20,24 +20,28 @@ func NewRedis(opt *redis.Options) *Redis {
 }
 
 func (r *Redis) AddPlayerToQueue(ctx context.Context, gameID string, playerID string) error {
-	exists, err := r.Client.LPos(ctx, "queue_"+gameID, playerID, redis.LPosArgs{}).Result()
-	if err != redis.Nil && err != nil {
+	_, err := r.Client.LPos(ctx, "queue_"+gameID, playerID, redis.LPosArgs{}).Result()
+	if err == redis.Nil {
+		// Player not found in queue, safe to add
+		return r.Client.RPush(ctx, "queue_"+gameID, playerID).Err()
+	}
+	if err != nil {
 		return err
 	}
-	if exists >= 0 {
-		return ErrPlayerAlreadyInQueue
-	}
-	return r.Client.RPush(ctx, "queue_"+gameID, playerID).Err()
+	// Player found in queue
+	return ErrPlayerAlreadyInQueue
 }
 
 func (r *Redis) RemovePlayerFromQueue(ctx context.Context, gameID string, playerID string) error {
-	exists, err := r.Client.LPos(ctx, "queue_"+gameID, playerID, redis.LPosArgs{}).Result()
-	if err != redis.Nil && err != nil {
-		return err
-	}
-	if exists < 0 {
+	_, err := r.Client.LPos(ctx, "queue_"+gameID, playerID, redis.LPosArgs{}).Result()
+	if err == redis.Nil {
+		// Player not found in queue
 		return ErrPlayerNotInQueue
 	}
+	if err != nil {
+		return err
+	}
+	// Player found in queue, safe to remove
 	return r.Client.LRem(ctx, "queue_"+gameID, 1, playerID).Err()
 }
 
