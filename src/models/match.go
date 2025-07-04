@@ -54,12 +54,7 @@ func (m *Match) ConnectionAddress() string {
 	return `{"http": "` + httpURL + `", "tcpURL": "` + tcpURL + `", "tcpMessage": "` + tcpMessage + `"}`
 }
 
-type MachineConnectionInfo struct {
-	MachineName string
-	AuthCode    string
-}
-
-func MatchStarted(gameID string, connInfo *MachineConnectionInfo, playerIDs []string) (*Match, error) {
+func MatchStarted(gameID string, connInfo *server.MachineConnectionInfo, playerIDs []string) (*Match, error) {
 	var users []User
 	var guestIDs []string
 

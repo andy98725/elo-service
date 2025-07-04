@@ -27,17 +27,17 @@ type UserClaims struct {
 	jwt.StandardClaims
 }
 
-func Login(email, displayName, password string) (string, error) {
+func Login(email, displayName, password string) (string, *models.User, error) {
 	user, err := models.GetByEmail(email)
 	if err != nil {
 		slog.Warn("Invalid email", "error", err)
-		return "", errors.New(ERR_INVALID_CREDENTIALS)
+		return "", nil, errors.New(ERR_INVALID_CREDENTIALS)
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password))
 	if err != nil {
 		slog.Warn("Invalid password", "error", err)
-		return "", errors.New(ERR_INVALID_CREDENTIALS)
+		return "", nil, errors.New(ERR_INVALID_CREDENTIALS)
 	}
 
 	if displayName == "" {
@@ -54,7 +54,11 @@ func Login(email, displayName, password string) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtKey)
+	signedToken, err := token.SignedString(jwtKey)
+	if err != nil {
+		return "", nil, err
+	}
+	return signedToken, user, nil
 
 }
 
@@ -64,7 +68,7 @@ type GuestClaims struct {
 	jwt.StandardClaims
 }
 
-func GuestLogin(displayName string) (string, error) {
+func GuestLogin(displayName string) (string, *GuestClaims, error) {
 	claims := &GuestClaims{
 		ID:          "g_" + uuid.New().String(),
 		DisplayName: displayName,
@@ -74,7 +78,11 @@ func GuestLogin(displayName string) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtKey)
+	signedToken, err := token.SignedString(jwtKey)
+	if err != nil {
+		return "", nil, err
+	}
+	return signedToken, claims, nil
 }
 
 func ValidateUserToken(tokenString string) (*UserClaims, error) {

@@ -21,12 +21,14 @@ func GuestToken(ctx echo.Context) error {
 	if req.DisplayName == "" {
 		return errors.New("missing required fields")
 	}
-	token, err := auth.GuestLogin(req.DisplayName)
+	token, claims, err := auth.GuestLogin(req.DisplayName)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
 	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{
-		"token": token,
+		"token":       token,
+		"displayName": claims.DisplayName,
+		"id":          claims.ID,
 	})
 }

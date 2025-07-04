@@ -39,7 +39,7 @@ func GarbageCollectMatches(ctx context.Context) error {
 			return err
 		}
 		if time.Since(startedAt) > MATCH_MAX_DURATION {
-			if err := StopMachine(match.MachineName); err != nil {
+			if err := server.StopMachine(match.MachineName); err != nil {
 				slog.Error("Failed to stop machine", "error", err, "matchID", matchID)
 			}
 

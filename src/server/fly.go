@@ -1,4 +1,4 @@
-package matchmaking
+package server
 
 import (
 	"bytes"
@@ -11,9 +11,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/andy98725/elo-service/src/models"
-	"github.com/andy98725/elo-service/src/server"
 )
 
 const portTemplate = `{
@@ -44,16 +41,24 @@ const jsonTemplate = `{
 	}
 }`
 
+type MachineConnectionInfo struct {
+	MachineName string
+	AuthCode    string
+}
+
 // FlyMachineResponse represents the response from Fly.io API when creating a machine
 type FlyMachineResponse struct {
 	ID string `json:"id"`
 }
 
-func StartMachine(gameID string, playerIDs []string) (*models.MachineConnectionInfo, error) {
-	game, err := models.GetGame(gameID)
-	if err != nil {
-		return nil, err
-	}
+type MachineConfig struct {
+	GameName                string
+	MatchmakingMachineName  string
+	MatchmakingMachinePorts []int64
+	PlayerIDs               []string
+}
+
+func StartMachine(config *MachineConfig) (*MachineConnectionInfo, error) {
 
 	// Generate 32 random bytes and encode as hex for secure token
 	tokenBytes := make([]byte, 32)
@@ -63,15 +68,15 @@ func StartMachine(gameID string, playerIDs []string) (*models.MachineConnectionI
 	authCode := strings.ReplaceAll(hex.EncodeToString(tokenBytes), " ", "-")
 	authCode = strings.ReplaceAll(authCode, "/", "-")
 
-	machineName := fmt.Sprintf("%s-%d", game.Name, time.Now().Unix())
+	machineName := fmt.Sprintf("%s-%d", config.GameName, time.Now().Unix())
 
-	playersStr := "\"" + strings.Join(playerIDs, "\", \"") + "\""
-	imageName := game.MatchmakingMachineName
+	playersStr := "\"" + strings.Join(config.PlayerIDs, "\", \"") + "\""
+	imageName := config.MatchmakingMachineName
 	if imageName == "" {
 		imageName = "docker.io/andy98725/example-server:latest"
 	}
 	ports := ""
-	for i, port := range game.MatchmakingMachinePorts {
+	for i, port := range config.MatchmakingMachinePorts {
 		if i > 0 {
 			ports += ","
 		}
@@ -80,13 +85,13 @@ func StartMachine(gameID string, playerIDs []string) (*models.MachineConnectionI
 	jsonData := fmt.Sprintf(jsonTemplate, machineName, authCode, playersStr, imageName, ports)
 
 	// Create HTTP request
-	url := fmt.Sprintf("%s/v1/apps/%s/machines", server.S.Config.FlyAPIHostname, server.S.Config.FlyAppName)
+	url := fmt.Sprintf("%s/v1/apps/%s/machines", S.Config.FlyAPIHostname, S.Config.FlyAppName)
 	req, err := http.NewRequest("POST", url, bytes.NewBufferString(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+server.S.Config.FlyAPIKey)
+	req.Header.Set("Authorization", "Bearer "+S.Config.FlyAPIKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -116,20 +121,20 @@ func StartMachine(gameID string, playerIDs []string) (*models.MachineConnectionI
 		return nil, fmt.Errorf("no machine ID in Fly.io API response")
 	}
 
-	return &models.MachineConnectionInfo{
+	return &MachineConnectionInfo{
 		MachineName: machineResp.ID,
 		AuthCode:    authCode,
 	}, nil
 }
 
 func StopMachine(machineID string) error {
-	url := fmt.Sprintf("%s/v1/apps/%s/machines/%s", server.S.Config.FlyAPIHostname, server.S.Config.FlyAppName, machineID)
+	url := fmt.Sprintf("%s/v1/apps/%s/machines/%s", S.Config.FlyAPIHostname, S.Config.FlyAppName, machineID)
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+server.S.Config.FlyAPIKey)
+	req.Header.Set("Authorization", "Bearer "+S.Config.FlyAPIKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)

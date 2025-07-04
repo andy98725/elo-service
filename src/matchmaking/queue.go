@@ -113,7 +113,7 @@ func PairPlayers(ctx context.Context) error {
 			}
 
 			// Create match
-			connInfo, err := StartMachine(gameID, players)
+			connInfo, err := server.StartMachine(&server.MachineConfig{GameName: game.Name, MatchmakingMachineName: game.MatchmakingMachineName, MatchmakingMachinePorts: game.MatchmakingMachinePorts, PlayerIDs: players})
 			if err != nil {
 				slog.Error("Failed to spawn machine", "error", err, "gameID", gameID, "players", players)
 				for _, player := range players {

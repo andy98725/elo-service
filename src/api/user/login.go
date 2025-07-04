@@ -19,12 +19,14 @@ func Login(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request payload")
 	}
 
-	token, err := auth.Login(req.Email, req.DisplayName, req.Password)
+	token, user, err := auth.Login(req.Email, req.DisplayName, req.Password)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, err.Error())
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{
-		"token": token,
+		"token":       token,
+		"displayName": req.DisplayName,
+		"id":          user.ID,
 	})
 }
