@@ -131,6 +131,10 @@ func PairPlayers(ctx context.Context) error {
 				}
 				continue
 			}
+			if err := server.S.Redis.AddMatchUnderway(ctx, match.ID); err != nil {
+				slog.Error("Failed to add match underway", "error", err, "matchID", match.ID)
+				continue
+			}
 			// Notify players that they are ready
 			for _, player := range players {
 				server.S.Redis.PublishMatchReady(ctx, gameID, player, "match_"+match.ID)

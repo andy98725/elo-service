@@ -3,6 +3,7 @@ package models
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
@@ -14,6 +15,7 @@ type Match struct {
 	GameID      string         `json:"game_id" gorm:"not null"`
 	Game        Game           `json:"game" gorm:"foreignKey:GameID"`
 	MachineName string         `json:"machine_name" gorm:""`
+	PublicPorts pq.Int64Array  `json:"public_ports" gorm:"type:integer[];default:'{}'"`
 	Players     []User         `json:"players" gorm:"many2many:match_players;"`
 	GuestIDs    pq.StringArray `json:"guest_ids" gorm:"type:text[];default:'{}'"`
 	AuthCode    string         `json:"auth_code" gorm:"not null"`
@@ -47,11 +49,11 @@ func (m *Match) ToResp() *MatchResp {
 }
 
 func (m *Match) ConnectionAddress() string {
-	httpURL := fmt.Sprintf("https://%s.fly.dev:8443/%s/{port}/", server.S.Config.FlyAppName, m.MachineName)
-	tcpURL := fmt.Sprintf("tcp://%s.fly.dev:8082", server.S.Config.FlyAppName)
-	tcpMessage := fmt.Sprintf("%s:{port}", m.MachineName)
-
-	return `{"http": "` + httpURL + `", "tcpURL": "` + tcpURL + `", "tcpMessage": "` + tcpMessage + `"}`
+	addresses := make([]string, len(m.PublicPorts))
+	for i, port := range m.PublicPorts {
+		addresses[i] = fmt.Sprintf(`"%s:%d"`, server.S.Config.Endpoint, port)
+	}
+	return `{"addresses": [` + strings.Join(addresses, ",") + `]}`
 }
 
 func MatchStarted(gameID string, connInfo *server.MachineConnectionInfo, playerIDs []string) (*Match, error) {
@@ -71,8 +73,9 @@ func MatchStarted(gameID string, connInfo *server.MachineConnectionInfo, playerI
 		GameID:      gameID,
 		Players:     users,
 		GuestIDs:    guestIDs,
-		MachineName: connInfo.MachineName,
+		MachineName: connInfo.MachineID,
 		AuthCode:    connInfo.AuthCode,
+		PublicPorts: pq.Int64Array(connInfo.PublicPorts),
 		Status:      "started",
 	}
 

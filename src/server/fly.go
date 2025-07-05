@@ -45,8 +45,9 @@ const jsonTemplate = `{
 }`
 
 type MachineConnectionInfo struct {
-	MachineName string
+	PublicPorts []int64
 	AuthCode    string
+	MachineID   string
 }
 
 // FlyMachineResponse represents the response from Fly.io API when creating a machine
@@ -130,8 +131,9 @@ func StartMachine(config *MachineConfig) (*MachineConnectionInfo, error) {
 	}
 
 	return &MachineConnectionInfo{
-		MachineName: machineResp.ID,
+		PublicPorts: publicPorts,
 		AuthCode:    authCode,
+		MachineID:   machineResp.ID,
 	}, nil
 }
 

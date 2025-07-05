@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
-	"strconv"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -68,11 +68,13 @@ return ports
 	`)
 }
 
-func (r *Redis) AllocatePorts(ctx context.Context, machineName string, numPorts int) ([]int, error) {
+func (r *Redis) AllocatePorts(ctx context.Context, machineName string, numPorts int) ([]int64, error) {
 	res, err := allocatePortsScript.Run(ctx, r.Client,
 		[]string{"used_ports", "machine_ports:" + machineName},
-		numPorts, MIN_PORT, MAX_PORT).Result()
-	if err != nil {
+		MIN_PORT, MAX_PORT, numPorts).Result()
+	if err == redis.Nil {
+		return nil, ErrPortsNotAvailable
+	} else if err != nil {
 		slog.Error("failed to allocate ports", "error", err, "machineName", machineName, "numPorts", numPorts, "res", res)
 		return nil, err
 	}
@@ -82,11 +84,12 @@ func (r *Redis) AllocatePorts(ctx context.Context, machineName string, numPorts 
 		return nil, ErrPortsNotAvailable
 	}
 
-	ports := make([]int, len(raw))
+	ports := make([]int64, len(raw))
 	for i, v := range raw {
-		ports[i], err = strconv.Atoi(v.(string))
-		if err != nil {
-			return nil, err
+		if val, ok := v.(int64); !ok {
+			return nil, fmt.Errorf("invalid port value type: %T", v)
+		} else {
+			ports[i] = val
 		}
 	}
 	return ports, nil

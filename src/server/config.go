@@ -16,6 +16,7 @@ type Config struct {
 	FlyAPIHostname      string
 	FlyAPIKey           string
 	FlyAppName          string
+	Endpoint            string
 }
 
 func InitConfig() (*Config, error) {
@@ -40,6 +41,10 @@ func InitConfig() (*Config, error) {
 
 	if cfg.FlyAppName = os.Getenv("FLY_APP_NAME"); cfg.FlyAppName == "" {
 		return nil, fmt.Errorf("FLY_APP_NAME is not set")
+	}
+
+	if cfg.Endpoint = os.Getenv("ENDPOINT"); cfg.Endpoint == "" {
+		cfg.Endpoint = "https://" + cfg.FlyAppName + ".fly.dev"
 	}
 
 	if matchmakingInterval, err := time.ParseDuration(os.Getenv("MATCHMAKING_INTERVAL")); err == nil && matchmakingInterval > 0 {
