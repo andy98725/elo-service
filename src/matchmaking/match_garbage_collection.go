@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andy98725/elo-service/src/api/match/results"
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
 )
@@ -19,6 +20,7 @@ func GarbageCollectMatches(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	slog.Info("garbage collecting matches", "matches", len(matches))
 
 	for _, matchKey := range matches {
 		matchID := strings.TrimPrefix(matchKey, "match_started_")
@@ -39,15 +41,8 @@ func GarbageCollectMatches(ctx context.Context) error {
 			return err
 		}
 		if time.Since(startedAt) > MATCH_MAX_DURATION {
-			if err := server.StopMachine(match.MachineName); err != nil {
-				slog.Error("Failed to stop machine", "error", err, "matchID", matchID)
-			}
-
 			slog.Info("Match timed out. Stopping machine", "matchID", matchID, "machineName", match.MachineName)
-			server.S.Redis.RemoveMatchUnderway(ctx, matchID)
-			if _, err := models.MatchEnded(matchID, "", "timeout"); err != nil {
-				slog.Error("Failed to report match result", "error", err, "matchID", matchID)
-			}
+			results.EndMatch(ctx, match, "", "timeout")
 		}
 	}
 

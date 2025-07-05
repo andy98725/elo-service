@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -13,10 +14,14 @@ import (
 	"time"
 )
 
-const portTemplate = `{
-	"port": %d,
-	"handlers": [ "tls", "http" ]
-}`
+const serviceTemplate = `{
+            "ports": [{
+                "port": %d,
+                "handlers": ["tls","http"]
+              }],
+            "protocol": "tcp",
+            "internal_port": %d
+          }`
 
 const jsonTemplate = `{
 	"name": "%s",
@@ -25,9 +30,7 @@ const jsonTemplate = `{
 			"cmd": [ "-token", "%s", %s]
 		},
 		"image": "%s",
-		"services": [ {
-			"ports": [ %s ]
-		} ],
+		"services": [%s],
 		"auto_destroy": true,
 		"restart": {
 			"policy": "no"
@@ -75,14 +78,19 @@ func StartMachine(config *MachineConfig) (*MachineConnectionInfo, error) {
 	if imageName == "" {
 		imageName = "docker.io/andy98725/example-server:latest"
 	}
-	ports := ""
+
+	publicPorts, err := S.Redis.AllocatePorts(context.Background(), machineName, len(config.MatchmakingMachinePorts))
+	if err != nil {
+		return nil, fmt.Errorf("failed to allocate ports: %w", err)
+	}
+	svcs := ""
 	for i, port := range config.MatchmakingMachinePorts {
 		if i > 0 {
-			ports += ","
+			svcs += ","
 		}
-		ports += fmt.Sprintf(portTemplate, port)
+		svcs += fmt.Sprintf(serviceTemplate, publicPorts[i], port)
 	}
-	jsonData := fmt.Sprintf(jsonTemplate, machineName, authCode, playersStr, imageName, ports)
+	jsonData := fmt.Sprintf(jsonTemplate, machineName, authCode, playersStr, imageName, svcs)
 
 	// Create HTTP request
 	url := fmt.Sprintf("%s/v1/apps/%s/machines", S.Config.FlyAPIHostname, S.Config.FlyAppName)
@@ -128,6 +136,7 @@ func StartMachine(config *MachineConfig) (*MachineConnectionInfo, error) {
 }
 
 func StopMachine(machineID string) error {
+	slog.Info("stopping machine", "machineID", machineID)
 	url := fmt.Sprintf("%s/v1/apps/%s/machines/%s", S.Config.FlyAPIHostname, S.Config.FlyAppName, machineID)
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
@@ -150,6 +159,11 @@ func StopMachine(machineID string) error {
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("fly.io API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	err = S.Redis.FreePorts(context.Background(), machineID)
+	if err != nil {
+		return fmt.Errorf("failed to free ports: %w", err)
 	}
 
 	return nil

@@ -120,8 +120,9 @@ func (r *Redis) AddMatchUnderway(ctx context.Context, matchID string) error {
 	return r.Client.Set(ctx, "match_started_"+matchID, time.Now().Unix(), 0).Err()
 }
 
-func (r *Redis) RemoveMatchUnderway(ctx context.Context, matchID string) error {
-	return r.Client.Del(ctx, "match_started_"+matchID).Err()
+func (r *Redis) RemoveMatchUnderway(ctx context.Context, matchID string) (bool, error) {
+	deleted, err := r.Client.Del(ctx, "match_started_"+matchID).Result()
+	return deleted > 0, err
 }
 
 func (r *Redis) MatchesUnderway(ctx context.Context) ([]string, error) {

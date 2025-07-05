@@ -76,6 +76,9 @@ type CreateGameParams struct {
 }
 
 func CreateGame(params CreateGameParams, owner User) (*Game, error) {
+	if params.MatchmakingMachineName == "" {
+		params.MatchmakingMachineName = "docker.io/andy98725/example-server:latest"
+	}
 	if params.MatchmakingStrategy == "" {
 		params.MatchmakingStrategy = MATCHMAKING_STRATEGY_RANDOM
 	}

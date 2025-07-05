@@ -94,6 +94,15 @@ func GetMatch(matchID string) (*Match, error) {
 	return &match, nil
 }
 
+func GetMatchByTokenID(tokenID string) (*Match, error) {
+	var match Match
+	result := server.S.DB.Preload("Players").First(&match, "auth_code = ?", tokenID)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &match, nil
+}
+
 func GetMatchesOfGame(gameID string, page, pageSize int) ([]Match, int, error) {
 	var matches []Match
 	offset := page * pageSize
