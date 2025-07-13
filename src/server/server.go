@@ -17,6 +17,7 @@ type Server struct {
 	Logger   *slog.Logger
 	DB       *gorm.DB
 	Redis    *Redis
+	Machines *HetznerConnection
 	e        *echo.Echo
 	Shutdown chan struct{}
 }
@@ -54,6 +55,14 @@ func InitServer(e *echo.Echo) (Server, error) {
 	}
 	S.DB = db
 	S.Logger.Info("Database connected")
+
+	// Hetzner
+	hetzner, err := InitHetznerConnection()
+	if err != nil {
+		return *S, err
+	}
+	S.Machines = hetzner
+	slog.Info("Hetzner connected")
 
 	return *S, nil
 }

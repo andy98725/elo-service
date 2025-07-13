@@ -36,7 +36,6 @@ func ReportResults(c echo.Context) error {
 }
 
 func EndMatch(ctx context.Context, match *models.Match, winnerID string, reason string) error {
-
 	if deleted, err := server.S.Redis.RemoveMatchUnderway(ctx, match.ID); err != nil {
 		slog.Error("Failed to remove match underway", "error", err, "matchID", match.ID)
 		return err
@@ -48,11 +47,7 @@ func EndMatch(ctx context.Context, match *models.Match, winnerID string, reason 
 		slog.Error("Failed to report match result", "error", err, "matchID", match.ID)
 		return err
 	}
-	if err := server.S.Redis.FreePorts(ctx, match.MachineName); err != nil {
-		slog.Error("Failed to free ports", "error", err, "matchID", match.ID)
-		return err
-	}
-	if err := server.StopMachine(match.MachineName); err != nil {
+	if err := server.S.Machines.DeleteServer(ctx, match.MachineName); err != nil {
 		slog.Error("Failed to stop machine", "error", err, "matchID", match.ID)
 		return err
 	}

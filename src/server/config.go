@@ -17,6 +17,10 @@ type Config struct {
 	FlyAPIKey           string
 	FlyAppName          string
 	Endpoint            string
+	// GKE Configuration
+	GKENamespace       string
+	GKEServiceAccount  string
+	GKEImagePullSecret string
 }
 
 func InitConfig() (*Config, error) {
@@ -58,6 +62,14 @@ func InitConfig() (*Config, error) {
 	} else {
 		cfg.MatchGCInterval = 1 * time.Minute
 	}
+
+	// GKE Configuration
+	if cfg.GKENamespace = os.Getenv("GKE_NAMESPACE"); cfg.GKENamespace == "" {
+		cfg.GKENamespace = "default"
+	}
+
+	cfg.GKEServiceAccount = os.Getenv("GKE_SERVICE_ACCOUNT")
+	cfg.GKEImagePullSecret = os.Getenv("GKE_IMAGE_PULL_SECRET")
 
 	return cfg, nil
 }

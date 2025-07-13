@@ -113,7 +113,12 @@ func PairPlayers(ctx context.Context) error {
 			}
 
 			// Create match
-			connInfo, err := server.StartMachine(&server.MachineConfig{GameName: game.Name, MatchmakingMachineName: game.MatchmakingMachineName, MatchmakingMachinePorts: game.MatchmakingMachinePorts, PlayerIDs: players})
+			connInfo, err := server.S.Machines.CreateServer(ctx, &server.MachineConfig{
+				GameName:                game.Name,
+				MatchmakingMachineName:  game.MatchmakingMachineName,
+				MatchmakingMachinePorts: game.MatchmakingMachinePorts,
+				PlayerIDs:               players,
+			})
 			if err != nil {
 				slog.Error("Failed to spawn machine", "error", err, "gameID", gameID, "players", players)
 				for _, player := range players {
@@ -131,7 +136,7 @@ func PairPlayers(ctx context.Context) error {
 				}
 				continue
 			}
-			if err := server.S.Redis.AddMatchUnderway(ctx, match.ID); err != nil {
+			if err := server.S.Redis.AddMatchUnderway(ctx, match.MachineName); err != nil {
 				slog.Error("Failed to add match underway", "error", err, "matchID", match.ID)
 				continue
 			}

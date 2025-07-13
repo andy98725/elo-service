@@ -1,10 +1,12 @@
 # TODO
 
-- [ ] Add guest support for matchmaking
-- [ ] Add actual connection info
+## elo-service
+
 - [ ] Add results report route
+- [ ] Clean up old proxy + dockerfiles
 
 
-- [ ] Prevent users from joining the same queue twice
+## Hetzner machines
 
-
+- [ ] Add SSH key
+- [ ] Pre-bake snapshots for startup time

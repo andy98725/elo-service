@@ -116,19 +116,19 @@ func (r *Redis) PublishMatchReady(ctx context.Context, gameID string, playerID s
 	return r.Client.Publish(ctx, "match_ready_"+gameID+"__"+playerID, message).Err()
 }
 
-func (r *Redis) AddMatchUnderway(ctx context.Context, matchID string) error {
-	return r.Client.Set(ctx, "match_started_"+matchID, time.Now().Unix(), 0).Err()
+func (r *Redis) AddMatchUnderway(ctx context.Context, machineName string) error {
+	return r.Client.Set(ctx, "machine_"+machineName, time.Now().Unix(), 0).Err()
 }
 
-func (r *Redis) RemoveMatchUnderway(ctx context.Context, matchID string) (bool, error) {
-	deleted, err := r.Client.Del(ctx, "match_started_"+matchID).Result()
+func (r *Redis) RemoveMatchUnderway(ctx context.Context, machineName string) (bool, error) {
+	deleted, err := r.Client.Del(ctx, "machine_"+machineName).Result()
 	return deleted > 0, err
 }
 
 func (r *Redis) MatchesUnderway(ctx context.Context) ([]string, error) {
-	return r.Client.Keys(ctx, "match_started_*").Result()
+	return r.Client.Keys(ctx, "machine_*").Result()
 }
 
-func (r *Redis) MatchStartedAt(ctx context.Context, matchID string) (time.Time, error) {
-	return r.Client.Get(ctx, "match_started_"+matchID).Time()
+func (r *Redis) MatchStartedAt(ctx context.Context, machineName string) (time.Time, error) {
+	return r.Client.Get(ctx, "machine_"+machineName).Time()
 }

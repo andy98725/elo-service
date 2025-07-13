@@ -3,7 +3,6 @@ package models
 import (
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
@@ -15,11 +14,12 @@ type Match struct {
 	GameID      string         `json:"game_id" gorm:"not null"`
 	Game        Game           `json:"game" gorm:"foreignKey:GameID"`
 	MachineName string         `json:"machine_name" gorm:""`
-	PublicPorts pq.Int64Array  `json:"public_ports" gorm:"type:integer[];default:'{}'"`
+	MachineIP   string         `json:"machine_ip" gorm:""`
 	Players     []User         `json:"players" gorm:"many2many:match_players;"`
 	GuestIDs    pq.StringArray `json:"guest_ids" gorm:"type:text[];default:'{}'"`
 	AuthCode    string         `json:"auth_code" gorm:"not null"`
 	Status      string         `json:"status" gorm:"not null"`
+	ExternalIP  string         `json:"external_ip" gorm:""` // GKE external IP
 	CreatedAt   time.Time      `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 	UpdatedAt   time.Time      `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 }
@@ -49,11 +49,7 @@ func (m *Match) ToResp() *MatchResp {
 }
 
 func (m *Match) ConnectionAddress() string {
-	addresses := make([]string, len(m.PublicPorts))
-	for i, port := range m.PublicPorts {
-		addresses[i] = fmt.Sprintf(`"%s:%d"`, server.S.Config.Endpoint, port)
-	}
-	return `{"addresses": [` + strings.Join(addresses, ",") + `]}`
+	return fmt.Sprintf(`"%s"`, m.MachineIP)
 }
 
 func MatchStarted(gameID string, connInfo *server.MachineConnectionInfo, playerIDs []string) (*Match, error) {
@@ -75,7 +71,7 @@ func MatchStarted(gameID string, connInfo *server.MachineConnectionInfo, playerI
 		GuestIDs:    guestIDs,
 		MachineName: connInfo.MachineID,
 		AuthCode:    connInfo.AuthCode,
-		PublicPorts: pq.Int64Array(connInfo.PublicPorts),
+		MachineIP:   connInfo.PublicIP,
 		Status:      "started",
 	}
 
@@ -91,6 +87,15 @@ func MatchStarted(gameID string, connInfo *server.MachineConnectionInfo, playerI
 func GetMatch(matchID string) (*Match, error) {
 	var match Match
 	result := server.S.DB.Preload("Players").First(&match, "id = ?", matchID)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &match, nil
+}
+
+func GetMatchByMachineName(machineName string) (*Match, error) {
+	var match Match
+	result := server.S.DB.Preload("Players").First(&match, "machine_name = ?", machineName)
 	if result.Error != nil {
 		return nil, result.Error
 	}

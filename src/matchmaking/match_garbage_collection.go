@@ -23,25 +23,26 @@ func GarbageCollectMatches(ctx context.Context) error {
 	slog.Info("garbage collecting matches", "matches", len(matches))
 
 	for _, matchKey := range matches {
-		matchID := strings.TrimPrefix(matchKey, "match_started_")
+		machineName := strings.TrimPrefix(matchKey, "machine_")
 
-		match, err := models.GetMatch(matchID)
+		match, err := models.GetMatchByMachineName(machineName)
 		if err != nil {
+			slog.Error("Failed to get match by machine name", "error", err, "machineName", machineName)
 			// If match is already finished, remove redis entry
 			if strings.Contains(err.Error(), "not found") {
-				server.S.Redis.RemoveMatchUnderway(ctx, matchID)
+				server.S.Redis.RemoveMatchUnderway(ctx, machineName)
 				continue
 			}
 			return err
 		}
 
 		// If match is still underway, check if it's been running for too long
-		startedAt, err := server.S.Redis.MatchStartedAt(ctx, matchID)
+		startedAt, err := server.S.Redis.MatchStartedAt(ctx, machineName)
 		if err != nil {
 			return err
 		}
 		if time.Since(startedAt) > MATCH_MAX_DURATION {
-			slog.Info("Match timed out. Stopping machine", "matchID", matchID, "machineName", match.MachineName)
+			slog.Info("Match timed out. Stopping machine", "machineName", machineName, "matchID", match.ID)
 			results.EndMatch(ctx, match, "", "timeout")
 		}
 	}
