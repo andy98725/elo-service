@@ -109,6 +109,7 @@ func PairPlayers(ctx context.Context) error {
 			// If not enough players, put them back in queue
 			if len(players) < game.LobbySize {
 				server.S.Redis.PushPlayersToQueue(ctx, gameID, players)
+				slog.Info("Not enough players, putting them back in queue", "gameID", gameID, "players", players)
 				continue
 			}
 

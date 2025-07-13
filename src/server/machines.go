@@ -126,21 +126,35 @@ func (h *HetznerConnection) DeleteServer(ctx context.Context, machineName string
 	return nil
 }
 
-// #cloud-config
-// package_update: true
-// packages:
-//   - docker.io
-// runcmd:
-//   - systemctl start docker
-//   - docker run -d -p 7777:7777 -p 7777:7777/udp docker.io/andy98725/autominions-server:latest -token abc123 player1 player2
+const hetznerCloudConfig = `#cloud-config
+package_update: true
+packages:
+  - docker.io
 
-// #cloud-config
-// package_update: true
-// packages:
-//   - docker.io
-// runcmd:
-//   - systemctl start docker
-//   - docker run -d -p 8080:8080 -p 8080:8080/udp docker.io/andy98725/example-server:latest -token abc123 player1 player2
+write_files:
+  - path: /root/start-containers.sh
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      set -e
+      mkdir -p /shared
+
+      docker run -d --name game-server \
+        %s -v /shared:/shared \
+        %s -token %s %s
+
+      nohup docker logs -f game-server > /shared/server.log 2>&1 &
+      docker run -d --name log-sidecar \
+        -p ${LOGS_PORT}:8080 \
+        -v /shared:/shared:ro \
+        docker.io/andy98725/game-server-sidecar:latest
+
+runcmd:
+  - systemctl start docker
+  - export LOGS_PORT=%d
+  - /root/start-containers.sh
+
+`
 
 func hetznerUserData(image string, ports []int64, token string, playerIDs []string) string {
 	portsStr := ""
@@ -149,15 +163,11 @@ func hetznerUserData(image string, ports []int64, token string, playerIDs []stri
 	}
 
 	playerIDsStr := strings.Join(playerIDs, " ")
+	logsPort := logsPort(9999, ports)
 
-	return fmt.Sprintf(`#cloud-config
-package_update: true
-packages:
-  - docker.io
-runcmd:
-  - systemctl start docker
-  - docker run -d %s %s -token %s %s`, portsStr, image, token, playerIDsStr)
+	return fmt.Sprintf(hetznerCloudConfig, portsStr, image, token, playerIDsStr, logsPort)
 }
+
 func generateToken() (string, error) {
 	tokenBytes := make([]byte, 32)
 	if _, err := io.ReadFull(rand.Reader, tokenBytes); err != nil {
@@ -166,4 +176,15 @@ func generateToken() (string, error) {
 	authCode := strings.ReplaceAll(hex.EncodeToString(tokenBytes), " ", "-")
 	authCode = strings.ReplaceAll(authCode, "/", "-")
 	return authCode, nil
+}
+func logsPort(defaultPort int64, ports []int64) int64 {
+	for isPresent := false; isPresent; defaultPort++ {
+		for _, port := range ports {
+			if port == defaultPort {
+				isPresent = true
+				break
+			}
+		}
+	}
+	return defaultPort
 }

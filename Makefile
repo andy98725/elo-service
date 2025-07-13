@@ -38,3 +38,8 @@ example-push:
 	cd example-game-server && docker build -t example-server .
 	docker tag example-server andy98725/example-server:latest
 	docker push andy98725/example-server:latest
+
+sidecar-push:
+	cd game-server-sidecar && docker build -t game-server-sidecar .
+	docker tag game-server-sidecar andy98725/game-server-sidecar:latest
+	docker push andy98725/game-server-sidecar:latest
