@@ -8,8 +8,8 @@ import (
 
 func InitRoutes(e *echo.Echo) error {
 	// Matchmaking
-	e.GET("/match/join", JoinQueueWebsocket, auth.RequireUserOrGuestAuth)
-	e.GET("/match/size", QueueSize, auth.RequireUserOrGuestAuth)
+	e.GET("/match/join", JoinQueueWebsocket, auth.RequireUserOrGuestAuth, auth.DisableCors)
+	e.GET("/match/size", QueueSize, auth.RequireUserOrGuestAuth, auth.DisableCors)
 	// CRUD
 	e.GET("/match/:matchID", GetMatch, auth.RequireUserAuth)
 	e.GET("/match/game/:gameID", GetMatchesOfGame, auth.RequireUserAuth)
@@ -19,6 +19,6 @@ func InitRoutes(e *echo.Echo) error {
 	e.GET("/result", GetMatchResults, auth.RequireUserAuth)
 
 	// Report results
-	e.POST("/result/report", results.ReportResults)
+	e.POST("/result/report", results.ReportResults, auth.DisableCors)
 	return nil
 }
