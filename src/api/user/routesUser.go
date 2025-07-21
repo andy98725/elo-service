@@ -7,9 +7,9 @@ import (
 )
 
 func InitRoutes(e *echo.Echo) error {
-	e.POST("/guest/login", GuestToken, auth.DisableCors)
-	e.POST("/user", Register, auth.DisableCors)
-	e.POST("/user/login", Login, auth.DisableCors)
+	e.POST("/guest/login", GuestToken, auth.AllowCors)
+	e.POST("/user", Register, auth.AllowCors)
+	e.POST("/user/login", Login, auth.AllowCors)
 	e.GET("/user", GetUser, auth.RequireUserAuth)
 	e.GET("/users", GetUsers, auth.RequireAdmin)
 	e.PUT("/user", UpdateUser, auth.RequireUserAuth)

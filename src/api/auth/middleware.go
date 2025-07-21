@@ -115,11 +115,20 @@ func RequireAdmin(next echo.HandlerFunc) echo.HandlerFunc {
 	})
 }
 
-func DisableCors(next echo.HandlerFunc) echo.HandlerFunc {
+func AllowCors(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
+		// Set CORS headers
 		c.Response().Header().Set("Access-Control-Allow-Origin", "*")
 		c.Response().Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Response().Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		c.Response().Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		c.Response().Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Response().Header().Set("Access-Control-Max-Age", "86400")
+
+		// Handle preflight OPTIONS request
+		if c.Request().Method == "OPTIONS" {
+			return c.NoContent(http.StatusOK)
+		}
+
 		return next(c)
 	}
 }
