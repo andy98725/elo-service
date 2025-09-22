@@ -42,7 +42,7 @@ func InitServer(e *echo.Echo) (Server, error) {
 		log.Fatalf("Failed to parse Redis URL: %v", err)
 	}
 	S.Redis = NewRedis(opt)
-	slog.Info("Redis connected")
+	slog.Info("Redis connected", "url", os.Getenv("REDIS_URL"))
 
 	// Postgres DB
 	if os.Getenv("DATABASE_URL") == "" {
