@@ -23,7 +23,11 @@ func (r *Redis) AddPlayerToQueue(ctx context.Context, gameID string, playerID st
 	_, err := r.Client.LPos(ctx, "queue_"+gameID, playerID, redis.LPosArgs{}).Result()
 	if err == redis.Nil {
 		// Player not found in queue, safe to add
-		return r.Client.RPush(ctx, "queue_"+gameID, playerID).Err()
+		if err := r.Client.RPush(ctx, "queue_"+gameID, playerID).Err(); err != nil {
+			return err
+		}
+		_ = r.PublishMatchmakingTrigger(ctx) // best-effort wake worker
+		return nil
 	}
 	if err != nil {
 		return err
@@ -43,8 +47,11 @@ func (r *Redis) AddPlayerToQueueWithTTL(ctx context.Context, gameID string, play
 		pipe.RPush(ctx, "queue_"+gameID, playerID)
 		// Set individual TTL for this player
 		pipe.Set(ctx, "player_queue_"+gameID+"_"+playerID, "1", ttl)
-		_, err := pipe.Exec(ctx)
-		return err
+		if _, err := pipe.Exec(ctx); err != nil {
+			return err
+		}
+		_ = r.PublishMatchmakingTrigger(ctx) // best-effort wake worker
+		return nil
 	}
 	if err != nil {
 		return err
@@ -131,4 +138,24 @@ func (r *Redis) MatchesUnderway(ctx context.Context) ([]string, error) {
 
 func (r *Redis) MatchStartedAt(ctx context.Context, machineName string) (time.Time, error) {
 	return r.Client.Get(ctx, "machine_"+machineName).Time()
+}
+
+const MatchmakingTriggerChannel = "matchmaking_trigger"
+
+func (r *Redis) SubscribeMatchmakingTrigger(ctx context.Context) *redis.PubSub {
+	return r.Client.Subscribe(ctx, MatchmakingTriggerChannel)
+}
+
+func (r *Redis) PublishMatchmakingTrigger(ctx context.Context) error {
+	return r.Client.Publish(ctx, MatchmakingTriggerChannel, "1").Err()
+}
+
+const GarbageCollectionTriggerChannel = "garbage_collection_trigger"
+
+func (r *Redis) SubscribeGarbageCollectionTrigger(ctx context.Context) *redis.PubSub {
+	return r.Client.Subscribe(ctx, GarbageCollectionTriggerChannel)
+}
+
+func (r *Redis) PublishGarbageCollectionTrigger(ctx context.Context) error {
+	return r.Client.Publish(ctx, GarbageCollectionTriggerChannel, "1").Err()
 }

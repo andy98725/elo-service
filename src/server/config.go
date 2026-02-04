@@ -10,16 +10,16 @@ import (
 )
 
 type Config struct {
-	Port                string
-	MatchmakingInterval time.Duration
-	MatchGCInterval     time.Duration
-	FlyAPIHostname      string
-	FlyAPIKey           string
-	FlyAppName          string
-	Endpoint            string
-	RedisURL            string
-	DatabaseURL         string
-	HCLOUDToken         string
+	Port                          string
+	MatchmakingPairingMinInterval time.Duration
+	MatchmakingGCMinInterval      time.Duration
+	FlyAPIHostname                string
+	FlyAPIKey                     string
+	FlyAppName                    string
+	Endpoint                      string
+	RedisURL                      string
+	DatabaseURL                   string
+	HCLOUDToken                   string
 }
 
 func InitConfig() (*Config, error) {
@@ -51,15 +51,15 @@ func InitConfig() (*Config, error) {
 	}
 
 	if matchmakingInterval, err := time.ParseDuration(os.Getenv("MATCHMAKING_INTERVAL")); err == nil && matchmakingInterval > 0 {
-		cfg.MatchmakingInterval = matchmakingInterval
+		cfg.MatchmakingPairingMinInterval = matchmakingInterval
 	} else {
-		cfg.MatchmakingInterval = 100 * time.Millisecond
+		cfg.MatchmakingPairingMinInterval = 100 * time.Millisecond
 	}
 
 	if matchGCInterval, err := time.ParseDuration(os.Getenv("MATCH_GC_INTERVAL")); err == nil && matchGCInterval > 0 {
-		cfg.MatchGCInterval = matchGCInterval
+		cfg.MatchmakingGCMinInterval = matchGCInterval
 	} else {
-		cfg.MatchGCInterval = 1 * time.Minute
+		cfg.MatchmakingGCMinInterval = 1 * time.Minute
 	}
 
 	if cfg.RedisURL = os.Getenv("REDIS_URL"); cfg.RedisURL == "" {
