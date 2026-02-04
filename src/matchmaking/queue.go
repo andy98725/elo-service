@@ -79,6 +79,7 @@ func PairPlayers(ctx context.Context) error {
 	// Get all queue keys
 	keys, err := server.S.Redis.AllQueues(ctx)
 	if err != nil {
+		slog.Error("Failed to get all queues", "error", err)
 		return err
 	}
 

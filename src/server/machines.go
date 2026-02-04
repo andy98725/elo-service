@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -20,12 +19,7 @@ type HetznerConnection struct {
 	// sshKey *hcloud.SSHKey
 }
 
-func InitHetznerConnection() (*HetznerConnection, error) {
-	token := os.Getenv("HCLOUD_TOKEN")
-	if token == "" {
-		return nil, fmt.Errorf("HCLOUD_TOKEN is not set")
-	}
-
+func InitHetznerConnection(token string) (*HetznerConnection, error) {
 	client := hcloud.NewClient(hcloud.WithToken(token))
 
 	// // Find SSH key

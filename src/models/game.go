@@ -34,6 +34,7 @@ type Game struct {
 	MatchmakingMachineName  string        `json:"matchmaking_machine_name" gorm:"not null"`
 	MatchmakingMachinePorts pq.Int64Array `json:"matchmaking_machine_ports" gorm:"type:integer[];default:'{}'"`
 	ELOStrategy             string        `json:"elo_strategy" gorm:"not null;default:'unranked'"`
+	DefaultRating           int           `json:"default_rating" gorm:"default:1000"`
 }
 
 type GameResp struct {

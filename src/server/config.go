@@ -17,10 +17,9 @@ type Config struct {
 	FlyAPIKey           string
 	FlyAppName          string
 	Endpoint            string
-	// GKE Configuration
-	GKENamespace       string
-	GKEServiceAccount  string
-	GKEImagePullSecret string
+	RedisURL            string
+	DatabaseURL         string
+	HCLOUDToken         string
 }
 
 func InitConfig() (*Config, error) {
@@ -63,13 +62,17 @@ func InitConfig() (*Config, error) {
 		cfg.MatchGCInterval = 1 * time.Minute
 	}
 
-	// GKE Configuration
-	if cfg.GKENamespace = os.Getenv("GKE_NAMESPACE"); cfg.GKENamespace == "" {
-		cfg.GKENamespace = "default"
+	if cfg.RedisURL = os.Getenv("REDIS_URL"); cfg.RedisURL == "" {
+		return nil, fmt.Errorf("REDIS_URL is not set")
 	}
 
-	cfg.GKEServiceAccount = os.Getenv("GKE_SERVICE_ACCOUNT")
-	cfg.GKEImagePullSecret = os.Getenv("GKE_IMAGE_PULL_SECRET")
+	if cfg.DatabaseURL = os.Getenv("DATABASE_URL"); cfg.DatabaseURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL is not set")
+	}
+
+	if cfg.HCLOUDToken = os.Getenv("HCLOUD_TOKEN"); cfg.HCLOUDToken == "" {
+		return nil, fmt.Errorf("HCLOUD_TOKEN is not set")
+	}
 
 	return cfg, nil
 }

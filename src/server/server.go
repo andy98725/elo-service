@@ -1,7 +1,7 @@
 package server
 
 import (
-	"errors"
+	"context"
 	"log"
 	"log/slog"
 	"os"
@@ -37,19 +37,18 @@ func InitServer(e *echo.Echo) (Server, error) {
 	S.Config = cfg
 
 	// Redis
-	opt, err := redis.ParseURL(os.Getenv("REDIS_URL"))
+	opt, err := redis.ParseURL(S.Config.RedisURL)
 	if err != nil {
 		log.Fatalf("Failed to parse Redis URL: %v", err)
 	}
 	S.Redis = NewRedis(opt)
-	slog.Info("Redis connected", "url", os.Getenv("REDIS_URL"))
+	if err := S.Redis.Client.Ping(context.Background()).Err(); err != nil {
+		log.Fatalf("Redis ping failed (is Redis running and REDIS_URL correct?): %v", err)
+	}
+	slog.Info("Redis connected")
 
 	// Postgres DB
-	if os.Getenv("DATABASE_URL") == "" {
-		return *S, errors.New("DATABASE_URL is not set")
-	}
-
-	db, err := gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(S.Config.DatabaseURL), &gorm.Config{})
 	if err != nil {
 		return *S, err
 	}
@@ -57,7 +56,7 @@ func InitServer(e *echo.Echo) (Server, error) {
 	S.Logger.Info("Database connected")
 
 	// Hetzner
-	hetzner, err := InitHetznerConnection()
+	hetzner, err := InitHetznerConnection(S.Config.HCLOUDToken)
 	if err != nil {
 		return *S, err
 	}
