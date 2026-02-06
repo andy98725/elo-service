@@ -28,32 +28,38 @@ func ReportResults(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "Match not found")
 	}
 
-	err = EndMatch(c.Request().Context(), match, req.WinnerID, req.Reason)
+	status, err := EndMatch(c.Request().Context(), match, req.WinnerID, req.Reason)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to end match")
 	}
-	return c.JSON(http.StatusOK, echo.Map{"message": "Thank you!"})
+	return c.JSON(http.StatusOK, echo.Map{"message": status})
 }
 
-func EndMatch(ctx context.Context, match *models.Match, winnerID string, reason string) error {
+func EndMatch(ctx context.Context, match *models.Match, winnerID string, reason string) (string, error) {
+	status := ""
 	if isUnderway, err := models.IsMatchUnderway(match.ID); err != nil {
-		return err
+		return "", err
 	} else if !isUnderway {
-		return errors.New("match is not underway")
+		return "", errors.New("match is not underway")
 	}
 
 	logsKey, err := saveMatchLogs(match.ID)
 	if err != nil {
-		slog.Error("Failed to save match logs", "error", err, "matchID", match.ID)
-		return err
+		slog.Warn("Failed to save match logs", "error", err, "matchID", match.ID)
+		logsKey = ""
+		status = "Failed to save match logs"
 	}
 	if _, err := models.MatchEnded(match.ID, winnerID, reason, logsKey); err != nil {
 		slog.Error("Failed to report match result", "error", err, "matchID", match.ID)
-		return err
+		return "", err
 	}
 	if err := server.S.Machines.DeleteServer(ctx, match.MachineName); err != nil {
 		slog.Error("Failed to stop machine. Machine will continue to run.", "error", err, "matchID", match.ID, "MachineName", match.MachineName)
-		return err
+		return "", err
 	}
-	return nil
+
+	if status == "" {
+		status = "Thank you!"
+	}
+	return status, nil
 }

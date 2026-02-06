@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -34,13 +35,14 @@ func InitAWSClient(accessKeyID, secretAccessKey, region, bucketName string) (*AW
 	return client, nil
 }
 
-func (c *AWSClient) UploadLogs(ctx context.Context, body io.Reader) (string, error) {
+func (c *AWSClient) UploadLogs(ctx context.Context, body []byte) (string, error) {
 	key := fmt.Sprintf("%d.log", time.Now().UnixMilli())
 
 	if _, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(c.bucketName),
-		Key:    aws.String("logs/" + key),
-		Body:   body,
+		Bucket:        aws.String(c.bucketName),
+		Key:           aws.String("logs/" + key),
+		Body:          bytes.NewReader(body),
+		ContentLength: aws.Int64(int64(len(body))),
 	}); err != nil {
 		return "", err
 	}

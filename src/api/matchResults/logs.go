@@ -3,6 +3,7 @@ package matchResults
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/andy98725/elo-service/src/models"
@@ -28,7 +29,13 @@ func saveMatchLogs(matchID string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	logsKey, err := server.S.AWS.UploadLogs(context.Background(), resp.Body)
+	// Ideally we'd stream, but AWS needs to know the content length ahead of time.
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	logsKey, err := server.S.AWS.UploadLogs(context.Background(), body)
 	if err != nil {
 		return "", err
 	}
