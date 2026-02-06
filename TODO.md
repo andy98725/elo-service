@@ -2,8 +2,8 @@
 
 ## elo-service
 
-[ ] Remove match gc in redis, just use models directly (running matches)
-[ ] Add saving + getting match logs in matchResult
+[ ] Expose match results to guest logins
+[ ] Finish e2e test off of that
 
 [ ] Clean up docker-compose
 

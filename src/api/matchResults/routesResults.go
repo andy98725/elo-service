@@ -12,6 +12,7 @@ func InitRoutes(e *echo.Echo) error {
 	e.GET("/results/:matchID/logs", GetMatchLogs, auth.RequireUserAuth)
 
 	// CRUD
+	// TODO: Allow guests to access these routes
 	e.GET("/results/:matchID", GetMatchResult, auth.RequireUserAuth)
 	e.GET("/game/:gameID/results", GetMatchResultsOfGame, auth.RequireUserAuth)
 	e.GET("/user/results", GetMatchResultsOfUser, auth.RequireUserAuth)
