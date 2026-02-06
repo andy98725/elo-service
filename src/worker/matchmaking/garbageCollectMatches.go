@@ -13,37 +13,27 @@ import (
 
 const (
 	MATCH_MAX_DURATION = 6 * time.Hour
+	GC_PAGE_SIZE       = 100
 )
 
 func GarbageCollectMatches(ctx context.Context) error {
-	matches, err := server.S.Redis.MatchesUnderway(ctx)
-	if err != nil {
-		return err
-	}
-	slog.Info("garbage collecting matches", "matches", len(matches))
+	var matches []models.Match
+	var nextPage int
+	var err error
 
-	for _, matchKey := range matches {
-		machineName := strings.TrimPrefix(matchKey, "machine_")
+	for page := 0; page != -1; page = nextPage {
+		if matches, nextPage, err = models.GetMatchesUnderway(page, GC_PAGE_SIZE); err != nil {
+			return err
+		}
 
-		match, err := models.GetMatchByMachineName(machineName)
-		if err != nil {
-			slog.Error("Failed to get match by machine name", "error", err, "machineName", machineName)
-			// If match is already finished, remove redis entry
-			if strings.Contains(err.Error(), "not found") {
-				server.S.Redis.RemoveMatchUnderway(ctx, machineName)
-				continue
+		for _, match := range matches {
+			// GC after timeout
+			if time.Since(match.CreatedAt) > MATCH_MAX_DURATION {
+				slog.Info("Match timed out. Stopping machine", "machineName", match.MachineName, "matchID", match.ID)
+				if err := matchResults.EndMatch(ctx, &match, "", "timeout"); err != nil {
+					slog.Error("Failed to end match", "error", err, "matchID", match.ID)
+				}
 			}
-			return err
-		}
-
-		// If match is still underway, check if it's been running for too long
-		startedAt, err := server.S.Redis.MatchStartedAt(ctx, machineName)
-		if err != nil {
-			return err
-		}
-		if time.Since(startedAt) > MATCH_MAX_DURATION {
-			slog.Info("Match timed out. Stopping machine", "machineName", machineName, "matchID", match.ID)
-			matchResults.EndMatch(ctx, match, "", "timeout")
 		}
 	}
 

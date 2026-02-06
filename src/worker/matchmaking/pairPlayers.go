@@ -103,12 +103,6 @@ func startMatch(ctx context.Context, gameID string, game *models.Game, players [
 		return err
 	}
 
-	// Add the match ID to redis store for garbage collection
-	if err := server.S.Redis.AddMatchUnderway(ctx, match.MachineName); err != nil {
-		slog.Error("Failed to add match underway", "error", err, "matchID", match.ID)
-		return err
-	}
-
 	// Notify all players that the match has started
 	for _, player := range players {
 		server.S.Redis.PublishMatchReady(ctx, gameID, player, "match_"+match.ID)

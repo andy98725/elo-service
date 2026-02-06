@@ -144,6 +144,29 @@ func GetMatches(page, pageSize int) ([]Match, int, error) {
 	return matches, nextPage, nil
 }
 
+func GetMatchesUnderway(page, pageSize int) ([]Match, int, error) {
+
+	var matches []Match
+	offset := page * pageSize
+	result := server.S.DB.Preload("Players").Offset(offset).Limit(pageSize).Find(&matches, "status = ?", "started")
+	if result.Error != nil {
+		return nil, -1, result.Error
+	}
+
+	nextPage := page + 1
+	if result.RowsAffected < int64(pageSize) {
+		nextPage = -1
+	}
+	return matches, nextPage, nil
+}
+func IsMatchUnderway(matchID string) (bool, error) {
+	match, err := GetMatch(matchID)
+	if err != nil {
+		return false, err
+	}
+	return match.Status == "started", nil
+}
+
 func CanUserSeeMatch(userID string, matchID string) (bool, error) {
 	match, err := GetMatch(matchID)
 	if err != nil {

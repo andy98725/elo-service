@@ -36,12 +36,10 @@ func ReportResults(c echo.Context) error {
 }
 
 func EndMatch(ctx context.Context, match *models.Match, winnerID string, reason string) error {
-	if deleted, err := server.S.Redis.RemoveMatchUnderway(ctx, match.ID); err != nil {
-		slog.Error("Failed to remove match underway", "error", err, "matchID", match.ID)
+	if isUnderway, err := models.IsMatchUnderway(match.ID); err != nil {
 		return err
-	} else if !deleted {
-		slog.Warn("Match not underway", "matchID", match.ID)
-		return errors.New("match not underway")
+	} else if !isUnderway {
+		return errors.New("match is not underway")
 	}
 
 	logsKey, err := saveMatchLogs(match.ID)
