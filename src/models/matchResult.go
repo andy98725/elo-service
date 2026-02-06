@@ -8,23 +8,26 @@ import (
 )
 
 type MatchResult struct {
-	ID        string    `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	GameID    string    `json:"game_id" gorm:"not null"`
-	Game      Game      `json:"game" gorm:"foreignKey:GameID"`
-	Players   []User    `json:"players" gorm:"many2many:match_result_players;"`
-	WinnerID  string    `json:"winner_id"`
-	Winner    User      `json:"winner" gorm:"foreignKey:WinnerID"`
-	Result    string    `json:"result" gorm:"not null"`
-	LogsKey   string    `json:"logs_key"`
-	IsPublic  bool      `json:"is_public" gorm:"default:false"`
-	CreatedAt time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt time.Time `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	ID            string    `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	GameID        string    `json:"game_id" gorm:"not null"`
+	Game          Game      `json:"game" gorm:"foreignKey:GameID"`
+	Players       []User    `json:"players" gorm:"many2many:match_result_players;"`
+	GuestIDs      []string  `json:"guest_ids" gorm:"type:text[];default:'{}'"`
+	GuestWinnerID string    `json:"guest_winner_id" gorm:""`
+	WinnerID      string    `json:"winner_id"`
+	Winner        User      `json:"winner" gorm:"foreignKey:WinnerID"`
+	Result        string    `json:"result" gorm:"not null"`
+	LogsKey       string    `json:"logs_key"`
+	IsPublic      bool      `json:"is_public" gorm:"default:false"`
+	CreatedAt     time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt     time.Time `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 }
 
 type MatchResultResp struct {
 	ID       string     `json:"id"`
 	GameID   string     `json:"game_id"`
 	Players  []UserResp `json:"players"`
+	GuestIDs []string   `json:"guest_ids"`
 	WinnerID string     `json:"winner_id"`
 	Result   string     `json:"result"`
 }
@@ -34,12 +37,17 @@ func (m *MatchResult) ToResp() *MatchResultResp {
 	for i, player := range m.Players {
 		playersResp[i] = *player.ToResp()
 	}
+	winner := m.WinnerID
+	if winner == "" {
+		winner = m.GuestWinnerID
+	}
 
 	return &MatchResultResp{
 		ID:       m.ID,
 		GameID:   m.GameID,
 		Players:  playersResp,
-		WinnerID: m.WinnerID,
+		GuestIDs: m.GuestIDs,
+		WinnerID: winner,
 		Result:   m.Result,
 	}
 }
@@ -53,14 +61,25 @@ func MatchEnded(matchID string, winnerID string, result string, logsKey string) 
 	if err != nil {
 		return nil, err
 	}
+	var winID string
+	var guestWinID string
+	if len(winnerID) > 2 && winnerID[:2] == "g_" {
+		guestWinID = winnerID
+		winID = ""
+	} else {
+		guestWinID = ""
+		winID = winnerID
+	}
 
 	matchResult := &MatchResult{
-		GameID:   match.GameID,
-		Players:  match.Players,
-		WinnerID: winnerID,
-		Result:   result,
-		LogsKey:  logsKey,
-		IsPublic: game.PublicResults,
+		GameID:        match.GameID,
+		Players:       match.Players,
+		GuestIDs:      match.GuestIDs,
+		WinnerID:      winID,
+		GuestWinnerID: guestWinID,
+		Result:        result,
+		LogsKey:       logsKey,
+		IsPublic:      game.PublicResults,
 	}
 
 	// Report result and delete match in one transaction
