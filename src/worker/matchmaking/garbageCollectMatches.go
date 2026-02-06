@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/andy98725/elo-service/src/api/match/results"
+	"github.com/andy98725/elo-service/src/api/matchResults"
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
 )
@@ -43,7 +43,7 @@ func GarbageCollectMatches(ctx context.Context) error {
 		}
 		if time.Since(startedAt) > MATCH_MAX_DURATION {
 			slog.Info("Match timed out. Stopping machine", "machineName", machineName, "matchID", match.ID)
-			results.EndMatch(ctx, match, "", "timeout")
+			matchResults.EndMatch(ctx, match, "", "timeout")
 		}
 	}
 

@@ -1,4 +1,4 @@
-package results
+package matchResults
 
 import (
 	"context"
@@ -43,12 +43,18 @@ func EndMatch(ctx context.Context, match *models.Match, winnerID string, reason 
 		slog.Warn("Match not underway", "matchID", match.ID)
 		return errors.New("match not underway")
 	}
-	if _, err := models.MatchEnded(match.ID, winnerID, reason); err != nil {
+
+	logsKey, err := models.SaveMatchLogs(match.ID)
+	if err != nil {
+		slog.Error("Failed to save match logs", "error", err, "matchID", match.ID)
+		return err
+	}
+	if _, err := models.MatchEnded(match.ID, winnerID, reason, logsKey); err != nil {
 		slog.Error("Failed to report match result", "error", err, "matchID", match.ID)
 		return err
 	}
 	if err := server.S.Machines.DeleteServer(ctx, match.MachineName); err != nil {
-		slog.Error("Failed to stop machine", "error", err, "matchID", match.ID)
+		slog.Error("Failed to stop machine. Machine will continue to run.", "error", err, "matchID", match.ID, "MachineName", match.MachineName)
 		return err
 	}
 	return nil

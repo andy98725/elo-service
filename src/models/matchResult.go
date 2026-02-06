@@ -1,6 +1,9 @@
 package models
 
 import (
+	"context"
+	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
@@ -15,6 +18,8 @@ type MatchResult struct {
 	WinnerID  string    `json:"winner_id"`
 	Winner    User      `json:"winner" gorm:"foreignKey:WinnerID"`
 	Result    string    `json:"result" gorm:"not null"`
+	LogsKey   string    `json:"logs_key"`
+	IsPublic  bool      `json:"is_public" gorm:"default:false"`
 	CreatedAt time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 }
@@ -42,8 +47,12 @@ func (m *MatchResult) ToResp() *MatchResultResp {
 	}
 }
 
-func MatchEnded(matchID string, winnerID string, result string) (*MatchResult, error) {
+func MatchEnded(matchID string, winnerID string, result string, logsKey string) (*MatchResult, error) {
 	match, err := GetMatch(matchID)
+	if err != nil {
+		return nil, err
+	}
+	game, err := GetGame(match.GameID)
 	if err != nil {
 		return nil, err
 	}
@@ -53,6 +62,8 @@ func MatchEnded(matchID string, winnerID string, result string) (*MatchResult, e
 		Players:  match.Players,
 		WinnerID: winnerID,
 		Result:   result,
+		LogsKey:  logsKey,
+		IsPublic: game.PublicResults,
 	}
 
 	// Report result and delete match in one transaction
@@ -94,6 +105,17 @@ func GetMatchResultsOfGame(gameID string, page, pageSize int) ([]MatchResult, in
 	return matchResults, nextPage, nil
 }
 
+func GetMatchResultsOfPlayer(playerID string, page, pageSize int) ([]MatchResult, int, error) {
+	var matchResults []MatchResult
+	offset := page * pageSize
+	result := server.S.DB.Preload("Players").Offset(offset).Limit(pageSize).Find(&matchResults, "players @> ARRAY[?]::uuid[]", playerID)
+	nextPage := page + 1
+	if result.RowsAffected < int64(pageSize) {
+		nextPage = -1
+	}
+	return matchResults, nextPage, nil
+}
+
 func GetMatchResults(page, pageSize int) ([]MatchResult, int, error) {
 	var matchResults []MatchResult
 	offset := page * pageSize
@@ -103,4 +125,60 @@ func GetMatchResults(page, pageSize int) ([]MatchResult, int, error) {
 		nextPage = -1
 	}
 	return matchResults, nextPage, nil
+}
+
+func CanUserSeeMatchResult(userID string, matchResultID string) (bool, error) {
+	matchResult, err := GetMatchResult(matchResultID)
+	if err != nil {
+		return false, err
+	}
+	if matchResult.IsPublic {
+		return true, nil
+	}
+
+	user, err := GetById(userID)
+	if err != nil {
+		return false, err
+	}
+
+	// Admin can see all match results
+	if user.IsAdmin {
+		return true, nil
+	}
+	// If user is owner of game, they can see all match results
+	if matchResult.Game.OwnerID == userID {
+		return true, nil
+	}
+	// If user is a player in the match, they can see the match result
+	for _, player := range matchResult.Players {
+		if player.ID == userID {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func SaveMatchLogs(matchID string) (string, error) {
+	match, err := GetMatch(matchID)
+	if err != nil {
+		return "", err
+	}
+
+	if match.MachineLogsPort == 0 {
+		return "", nil
+	}
+
+	resp, err := http.Get(fmt.Sprintf("http://%s:%d/logs", match.MachineIP, match.MachineLogsPort))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	logsKey, err := server.S.AWS.UploadLogs(context.Background(), resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return logsKey, nil
 }

@@ -6,14 +6,29 @@ import (
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/util"
 	"github.com/labstack/echo"
+	"gorm.io/gorm"
 )
 
 func GetMatch(ctx echo.Context) error {
 	matchID := ctx.Param("matchID")
-	match, err := models.GetMatch(matchID)
+	userID, err := models.UserIDFromContext(ctx)
 	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "error getting user: "+err.Error())
+	}
+
+	match, err := models.GetMatch(matchID)
+	if err == gorm.ErrRecordNotFound {
+		return echo.NewHTTPError(http.StatusNotFound, "Match not found")
+	} else if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}
+
+	if canSee, err := models.CanUserSeeMatch(userID, matchID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "error checking if user can see match: "+err.Error())
+	} else if !canSee {
+		return echo.NewHTTPError(http.StatusNotFound, "Match not found")
+	}
+
 	return ctx.JSON(http.StatusOK, match.ToResp())
 }
 
@@ -23,15 +38,24 @@ func GetMatchesOfGame(ctx echo.Context) error {
 	if err != nil {
 		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
 	}
+	userID, err := models.UserIDFromContext(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "error getting user: "+err.Error())
+	}
 
 	matches, nextPage, err := models.GetMatchesOfGame(gameID, page, pageSize)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}
 
-	matchesResp := make([]models.MatchResp, len(matches))
-	for i, match := range matches {
-		matchesResp[i] = *match.ToResp()
+	matchesResp := []models.MatchResp{}
+	for _, match := range matches {
+		if canSee, err := models.CanUserSeeMatch(userID, match.ID); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "error checking if user can see match: "+err.Error())
+		} else if !canSee {
+			continue
+		}
+		matchesResp = append(matchesResp, *match.ToResp())
 	}
 
 	return ctx.JSON(http.StatusOK, echo.Map{"matches": matchesResp, "nextPage": nextPage})
@@ -50,52 +74,4 @@ func GetMatches(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, echo.Map{"matches": matches, "nextPage": nextPage})
-}
-
-func GetMatchResult(ctx echo.Context) error {
-	matchID := ctx.Param("matchID")
-	matchResult, err := models.GetMatchResult(matchID)
-	if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
-	}
-	return ctx.JSON(http.StatusOK, matchResult.ToResp())
-}
-
-func GetMatchResultsOfGame(ctx echo.Context) error {
-	gameID := ctx.Param("gameID")
-	page, pageSize, err := util.ParsePagination(ctx)
-	if err != nil {
-		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
-	}
-
-	matchResults, nextPage, err := models.GetMatchResultsOfGame(gameID, page, pageSize)
-	if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
-	}
-
-	matchResultsResp := make([]models.MatchResultResp, len(matchResults))
-	for i, matchResult := range matchResults {
-		matchResultsResp[i] = *matchResult.ToResp()
-	}
-
-	return ctx.JSON(http.StatusOK, echo.Map{"matchResults": matchResultsResp, "nextPage": nextPage})
-}
-
-func GetMatchResults(ctx echo.Context) error {
-	page, pageSize, err := util.ParsePagination(ctx)
-	if err != nil {
-		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
-	}
-
-	matchResults, nextPage, err := models.GetMatchResults(page, pageSize)
-	if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
-	}
-
-	matchResultsResp := make([]models.MatchResultResp, len(matchResults))
-	for i, matchResult := range matchResults {
-		matchResultsResp[i] = *matchResult.ToResp()
-	}
-
-	return ctx.JSON(http.StatusOK, echo.Map{"matchResults": matchResultsResp, "nextPage": nextPage})
 }

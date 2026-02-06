@@ -1,4 +1,4 @@
-package routes
+package rating
 
 import (
 	"github.com/labstack/echo"

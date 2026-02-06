@@ -11,18 +11,18 @@ import (
 )
 
 type Match struct {
-	ID          string         `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	GameID      string         `json:"game_id" gorm:"not null"`
-	Game        Game           `json:"game" gorm:"foreignKey:GameID"`
-	MachineName string         `json:"machine_name" gorm:""`
-	MachineIP   string         `json:"machine_ip" gorm:""`
-	Players     []User         `json:"players" gorm:"many2many:match_players;"`
-	GuestIDs    pq.StringArray `json:"guest_ids" gorm:"type:text[];default:'{}'"`
-	AuthCode    string         `json:"auth_code" gorm:"not null"`
-	Status      string         `json:"status" gorm:"not null"`
-	ExternalIP  string         `json:"external_ip" gorm:""` // GKE external IP
-	CreatedAt   time.Time      `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt   time.Time      `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	ID              string         `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	GameID          string         `json:"game_id" gorm:"not null"`
+	Game            Game           `json:"game" gorm:"foreignKey:GameID"`
+	MachineName     string         `json:"machine_name" gorm:""`
+	MachineIP       string         `json:"machine_ip" gorm:""`
+	MachineLogsPort int64          `json:"machine_logs_port" gorm:""`
+	Players         []User         `json:"players" gorm:"many2many:match_players;"`
+	GuestIDs        pq.StringArray `json:"guest_ids" gorm:"type:text[];default:'{}'"`
+	AuthCode        string         `json:"auth_code" gorm:"not null"`
+	Status          string         `json:"status" gorm:"not null"`
+	CreatedAt       time.Time      `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt       time.Time      `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 }
 
 type MatchResp struct {
@@ -67,13 +67,15 @@ func MatchStarted(gameID string, connInfo *hetzner.MachineConnectionInfo, player
 	}
 
 	match := &Match{
-		GameID:      gameID,
-		Players:     users,
-		GuestIDs:    guestIDs,
-		MachineName: connInfo.MachineID,
-		AuthCode:    connInfo.AuthCode,
-		MachineIP:   connInfo.PublicIP,
-		Status:      "started",
+		GameID:          gameID,
+		Players:         users,
+		GuestIDs:        guestIDs,
+		MachineName:     connInfo.MachineID,
+		AuthCode:        connInfo.AuthCode,
+		MachineIP:       connInfo.PublicIP,
+		MachineLogsPort: connInfo.LogsPort,
+
+		Status: "started",
 	}
 
 	result := server.S.DB.Create(match)
@@ -140,4 +142,38 @@ func GetMatches(page, pageSize int) ([]Match, int, error) {
 		nextPage = -1
 	}
 	return matches, nextPage, nil
+}
+
+func CanUserSeeMatch(userID string, matchID string) (bool, error) {
+	match, err := GetMatch(matchID)
+	if err != nil {
+		return false, err
+	}
+	user, err := GetById(userID)
+	if err != nil {
+		return false, err
+	}
+
+	// Admin can see all matches
+	if user.IsAdmin {
+		return true, nil
+	}
+	// If user is owner of game, they can see all matches
+	if match.Game.OwnerID == userID {
+		return true, nil
+	}
+
+	// If player or guest is in match, they can see
+	for _, player := range match.Players {
+		if player.ID == userID {
+			return true, nil
+		}
+	}
+	for _, guestID := range match.GuestIDs {
+		if guestID == userID {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

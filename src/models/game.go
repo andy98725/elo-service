@@ -27,8 +27,10 @@ type Game struct {
 	Name        string    `json:"name" gorm:"uniqueIndex;not null"`
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+
 	// TODO separate into leaderboard if needed
 	GuestsAllowed           bool          `json:"guests_allowed" gorm:"default:true"`
+	PublicResults           bool          `json:"public_results" gorm:"default:false"`
 	LobbySize               int           `json:"lobby_size" gorm:"default:2"`
 	MatchmakingStrategy     string        `json:"matchmaking_strategy" gorm:"not null;default:'random'"`
 	MatchmakingMachineName  string        `json:"matchmaking_machine_name" gorm:"not null"`
@@ -69,6 +71,7 @@ type CreateGameParams struct {
 	Name                    string
 	Description             string
 	GuestsAllowed           bool
+	PublicResults           bool
 	LobbySize               int
 	MatchmakingStrategy     string
 	MatchmakingMachineName  string
@@ -99,6 +102,7 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		Name:                    params.Name,
 		Description:             params.Description,
 		GuestsAllowed:           params.GuestsAllowed,
+		PublicResults:           params.PublicResults,
 		LobbySize:               params.LobbySize,
 		MatchmakingStrategy:     params.MatchmakingStrategy,
 		MatchmakingMachineName:  params.MatchmakingMachineName,

@@ -50,6 +50,7 @@ type MachineConnectionInfo struct {
 	MachineID string
 	AuthCode  string
 	PublicIP  string
+	LogsPort  int64
 }
 
 var sanitizeRegex = regexp.MustCompile(`[^a-zA-Z0-9]`)
@@ -62,7 +63,7 @@ func (h *HetznerConnection) CreateServer(ctx context.Context, config *MachineCon
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate secure token: %w", err)
 	}
-	userData := hetznerUserData(config.MatchmakingMachineName, config.MatchmakingMachinePorts, token, config.PlayerIDs)
+	userData, logsPort := hetznerUserData(config.MatchmakingMachineName, config.MatchmakingMachinePorts, token, config.PlayerIDs)
 
 	sanitizedGameName := sanitizeRegex.ReplaceAllString(config.GameName, "")
 
@@ -106,6 +107,7 @@ func (h *HetznerConnection) CreateServer(ctx context.Context, config *MachineCon
 		MachineID: serverName,
 		AuthCode:  token,
 		PublicIP:  publicIP,
+		LogsPort:  logsPort,
 	}, nil
 }
 
@@ -150,7 +152,7 @@ runcmd:
 
 `
 
-func hetznerUserData(image string, ports []int64, token string, playerIDs []string) string {
+func hetznerUserData(image string, ports []int64, token string, playerIDs []string) (string, int64) {
 	portsStr := ""
 	for _, port := range ports {
 		portsStr += fmt.Sprintf("-p %d:%d -p %d:%d/udp ", port, port, port, port)
@@ -159,7 +161,7 @@ func hetznerUserData(image string, ports []int64, token string, playerIDs []stri
 	playerIDsStr := strings.Join(playerIDs, " ")
 	logsPort := logsPort(9999, ports)
 
-	return fmt.Sprintf(hetznerCloudConfig, portsStr, image, token, playerIDsStr, logsPort)
+	return fmt.Sprintf(hetznerCloudConfig, portsStr, image, token, playerIDsStr, logsPort), logsPort
 }
 
 func generateToken() (string, error) {
@@ -171,6 +173,7 @@ func generateToken() (string, error) {
 	authCode = strings.ReplaceAll(authCode, "/", "-")
 	return authCode, nil
 }
+
 func logsPort(defaultPort int64, ports []int64) int64 {
 	for isPresent := false; isPresent; defaultPort++ {
 		for _, port := range ports {

@@ -2,7 +2,11 @@ package aws
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -28,4 +32,29 @@ func InitAWSClient(accessKeyID, secretAccessKey, region, bucketName string) (*AW
 	}
 
 	return client, nil
+}
+
+func (c *AWSClient) UploadLogs(ctx context.Context, body io.Reader) (string, error) {
+	key := fmt.Sprintf("%d.log", time.Now().UnixMilli())
+
+	if _, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(c.bucketName),
+		Key:    aws.String("logs/" + key),
+		Body:   body,
+	}); err != nil {
+		return "", err
+	}
+
+	return key, nil
+}
+
+func (c *AWSClient) GetLogs(ctx context.Context, key string) (io.Reader, error) {
+	resp, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucketName),
+		Key:    aws.String("logs/" + key),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
 }
