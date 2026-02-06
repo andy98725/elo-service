@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/andy98725/elo-service/src/external/aws"
 	"github.com/andy98725/elo-service/src/external/hetzner"
 	"github.com/andy98725/elo-service/src/external/redis"
 	"github.com/labstack/echo"
@@ -16,6 +17,7 @@ type Server struct {
 	Logger   *slog.Logger
 	DB       *gorm.DB
 	Redis    *redis.Redis
+	AWS      *aws.AWSClient
 	Machines *hetzner.HetznerConnection
 	e        *echo.Echo
 	Shutdown chan struct{}
@@ -49,6 +51,13 @@ func InitServer(e *echo.Echo) (Server, error) {
 	}
 	S.DB = db
 	S.Logger.Info("Database connected")
+
+	// AWS
+	S.AWS, err = aws.InitAWSClient(S.Config.AWSAccessKeyID, S.Config.AWSSecretAccessKey, S.Config.AWSRegion, S.Config.AWSBucketName)
+	if err != nil {
+		return *S, err
+	}
+	slog.Info("AWS connected")
 
 	// Hetzner
 	hetzner, err := hetzner.InitHetznerConnection(S.Config.HCLOUDToken)

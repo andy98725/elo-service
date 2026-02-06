@@ -20,6 +20,10 @@ type Config struct {
 	RedisURL                      string
 	DatabaseURL                   string
 	HCLOUDToken                   string
+	AWSAccessKeyID                string
+	AWSSecretAccessKey            string
+	AWSRegion                     string
+	AWSBucketName                 string
 }
 
 func InitConfig() (*Config, error) {
@@ -72,6 +76,22 @@ func InitConfig() (*Config, error) {
 
 	if cfg.HCLOUDToken = os.Getenv("HCLOUD_TOKEN"); cfg.HCLOUDToken == "" {
 		return nil, fmt.Errorf("HCLOUD_TOKEN is not set")
+	}
+
+	if cfg.AWSAccessKeyID = os.Getenv("AWS_ACCESS_KEY_ID"); cfg.AWSAccessKeyID == "" {
+		return nil, fmt.Errorf("AWS_ACCESS_KEY_ID is not set")
+	}
+
+	if cfg.AWSSecretAccessKey = os.Getenv("AWS_SECRET_ACCESS_KEY"); cfg.AWSSecretAccessKey == "" {
+		return nil, fmt.Errorf("AWS_SECRET_ACCESS_KEY is not set")
+	}
+
+	if cfg.AWSRegion = os.Getenv("AWS_REGION"); cfg.AWSRegion == "" {
+		return nil, fmt.Errorf("AWS_REGION is not set")
+	}
+
+	if cfg.AWSBucketName = os.Getenv("AWS_BUCKET_NAME"); cfg.AWSBucketName == "" {
+		return nil, fmt.Errorf("AWS_BUCKET_NAME is not set")
 	}
 
 	return cfg, nil
