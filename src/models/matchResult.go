@@ -4,23 +4,24 @@ import (
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
 
 type MatchResult struct {
-	ID            string    `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	GameID        string    `json:"game_id" gorm:"not null"`
-	Game          Game      `json:"game" gorm:"foreignKey:GameID"`
-	Players       []User    `json:"players" gorm:"many2many:match_result_players;"`
-	GuestIDs      []string  `json:"guest_ids" gorm:"type:text[];default:'{}'"`
-	GuestWinnerID string    `json:"guest_winner_id" gorm:""`
-	WinnerID      string    `json:"winner_id"`
-	Winner        User      `json:"winner" gorm:"foreignKey:WinnerID"`
-	Result        string    `json:"result" gorm:"not null"`
-	LogsKey       string    `json:"logs_key"`
-	IsPublic      bool      `json:"is_public" gorm:"default:false"`
-	CreatedAt     time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt     time.Time `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	ID            string         `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	GameID        string         `json:"game_id" gorm:"not null"`
+	Game          Game           `json:"game" gorm:"foreignKey:GameID"`
+	Players       []User         `json:"players" gorm:"many2many:match_result_players;"`
+	GuestIDs      pq.StringArray `json:"guest_ids" gorm:"type:text[];default:'{}'"`
+	GuestWinnerID string         `json:"guest_winner_id" gorm:""`
+	WinnerID      string         `json:"winner_id"`
+	Winner        User           `json:"winner" gorm:"foreignKey:WinnerID"`
+	Result        string         `json:"result" gorm:"not null"`
+	LogsKey       string         `json:"logs_key"`
+	IsPublic      bool           `json:"is_public" gorm:"default:false"`
+	CreatedAt     time.Time      `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt     time.Time      `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 }
 
 type MatchResultResp struct {
@@ -124,7 +125,15 @@ func GetMatchResultsOfGame(gameID string, page, pageSize int) ([]MatchResult, in
 func GetMatchResultsOfPlayer(playerID string, page, pageSize int) ([]MatchResult, int, error) {
 	var matchResults []MatchResult
 	offset := page * pageSize
-	result := server.S.DB.Preload("Players").Offset(offset).Limit(pageSize).Find(&matchResults, "players @> ARRAY[?]::uuid[]", playerID)
+
+	q := server.S.DB.Preload("Players").Offset(offset).Limit(pageSize)
+	if len(playerID) > 2 && playerID[:2] == "g_" {
+		q = q.Where("? = ANY(guest_ids)", playerID)
+	} else {
+		q = q.Where("? = players @> ARRAY[?]::uuid[]", playerID)
+	}
+	result := q.Find(&matchResults)
+
 	nextPage := page + 1
 	if result.RowsAffected < int64(pageSize) {
 		nextPage = -1

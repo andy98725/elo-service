@@ -45,6 +45,7 @@ func (m *Match) ToResp() *MatchResp {
 		GameID:      m.GameID,
 		MachineName: m.MachineName,
 		Players:     players,
+		GuestIDs:    m.GuestIDs,
 		Status:      m.Status,
 	}
 }
