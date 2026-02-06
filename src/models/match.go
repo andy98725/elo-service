@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/andy98725/elo-service/src/external/hetzner"
 	"github.com/andy98725/elo-service/src/server"
 	"github.com/lib/pq"
 )
@@ -52,7 +53,7 @@ func (m *Match) ConnectionAddress() string {
 	return fmt.Sprintf(`"%s"`, m.MachineIP)
 }
 
-func MatchStarted(gameID string, connInfo *server.MachineConnectionInfo, playerIDs []string) (*Match, error) {
+func MatchStarted(gameID string, connInfo *hetzner.MachineConnectionInfo, playerIDs []string) (*Match, error) {
 	var users []User
 	var guestIDs []string
 

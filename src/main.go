@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/andy98725/elo-service/src/api"
-	mm "github.com/andy98725/elo-service/src/matchmaking/service"
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
+	"github.com/andy98725/elo-service/src/worker"
 
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
@@ -53,7 +53,7 @@ func main() {
 	}
 
 	// Start worker
-	go mm.RunWorker(context.Background(), s.Shutdown)
+	go worker.RunWorker(context.Background(), s.Shutdown)
 	// Start server
 	go e.Start(":" + s.Config.Port)
 

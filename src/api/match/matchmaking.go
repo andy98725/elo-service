@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/andy98725/elo-service/src/matchmaking"
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
+	"github.com/andy98725/elo-service/src/worker/matchmaking"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo"
 )

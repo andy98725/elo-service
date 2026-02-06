@@ -1,12 +1,12 @@
-package matchmaking_service
+package worker
 
 import (
 	"context"
 	"log/slog"
 	"time"
 
-	"github.com/andy98725/elo-service/src/matchmaking"
 	"github.com/andy98725/elo-service/src/server"
+	"github.com/andy98725/elo-service/src/worker/matchmaking"
 )
 
 // This can be moved to its own app eventually.

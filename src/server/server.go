@@ -1,13 +1,12 @@
 package server
 
 import (
-	"context"
-	"log"
 	"log/slog"
 	"os"
 
+	"github.com/andy98725/elo-service/src/external/hetzner"
+	"github.com/andy98725/elo-service/src/external/redis"
 	"github.com/labstack/echo"
-	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -16,8 +15,8 @@ type Server struct {
 	Config   *Config
 	Logger   *slog.Logger
 	DB       *gorm.DB
-	Redis    *Redis
-	Machines *HetznerConnection
+	Redis    *redis.Redis
+	Machines *hetzner.HetznerConnection
 	e        *echo.Echo
 	Shutdown chan struct{}
 }
@@ -37,13 +36,9 @@ func InitServer(e *echo.Echo) (Server, error) {
 	S.Config = cfg
 
 	// Redis
-	opt, err := redis.ParseURL(S.Config.RedisURL)
+	S.Redis, err = redis.NewRedis(S.Config.RedisURL)
 	if err != nil {
-		log.Fatalf("Failed to parse Redis URL: %v", err)
-	}
-	S.Redis = NewRedis(opt)
-	if err := S.Redis.Client.Ping(context.Background()).Err(); err != nil {
-		log.Fatalf("Redis ping failed (is Redis running and REDIS_URL correct?): %v", err)
+		return *S, err
 	}
 	slog.Info("Redis connected")
 
@@ -56,7 +51,7 @@ func InitServer(e *echo.Echo) (Server, error) {
 	S.Logger.Info("Database connected")
 
 	// Hetzner
-	hetzner, err := InitHetznerConnection(S.Config.HCLOUDToken)
+	hetzner, err := hetzner.InitHetznerConnection(S.Config.HCLOUDToken)
 	if err != nil {
 		return *S, err
 	}

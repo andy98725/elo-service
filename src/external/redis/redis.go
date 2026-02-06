@@ -1,8 +1,9 @@
-package server
+package redis
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -15,8 +16,18 @@ type Redis struct {
 	Client *redis.Client
 }
 
-func NewRedis(opt *redis.Options) *Redis {
-	return &Redis{Client: redis.NewClient(opt)}
+func NewRedis(redisURL string) (*Redis, error) {
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Redis URL: %v", err)
+	}
+
+	client := &Redis{Client: redis.NewClient(opt)}
+	if err := client.Client.Ping(context.Background()).Err(); err != nil {
+		return nil, fmt.Errorf("Redis ping failed (is Redis running and REDIS_URL correct?): %v", err)
+	}
+
+	return client, nil
 }
 
 func (r *Redis) AddPlayerToQueue(ctx context.Context, gameID string, playerID string) error {

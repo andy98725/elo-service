@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andy98725/elo-service/src/external/hetzner"
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
 )
@@ -78,7 +79,7 @@ func NotifyOnReady(ctx context.Context, playerID string, gameID string, resultCh
 func startMatch(ctx context.Context, gameID string, game *models.Game, players []string) error {
 	slog.Info("Starting match", "gameID", gameID, "players", players)
 	// Create the k8s image containing the match
-	connInfo, err := server.S.Machines.CreateServer(ctx, &server.MachineConfig{
+	connInfo, err := server.S.Machines.CreateServer(ctx, &hetzner.MachineConfig{
 		GameName:                game.Name,
 		MatchmakingMachineName:  game.MatchmakingMachineName,
 		MatchmakingMachinePorts: game.MatchmakingMachinePorts,
