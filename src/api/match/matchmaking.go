@@ -86,13 +86,13 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 
 			if resp.Error != nil {
 				conn.WriteJSON(echo.Map{"status": "error", "error": resp.Error.Error()})
-				return resp.Error
+				return nil
 			}
 
 			match, err := models.GetMatch(resp.MatchID)
 			if err != nil {
 				conn.WriteJSON(echo.Map{"status": "error", "error": err.Error()})
-				return err
+				return nil
 			}
 
 			conn.WriteJSON(echo.Map{"status": "match_found", "server_address": match.ConnectionAddress()})

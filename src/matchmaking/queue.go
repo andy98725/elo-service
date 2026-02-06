@@ -75,6 +75,47 @@ func NotifyOnReady(ctx context.Context, playerID string, gameID string, resultCh
 	}()
 }
 
+func startMatch(ctx context.Context, gameID string, game *models.Game, players []string) error {
+	slog.Info("Starting match", "gameID", gameID, "players", players)
+	// Create the k8s image containing the match
+	connInfo, err := server.S.Machines.CreateServer(ctx, &server.MachineConfig{
+		GameName:                game.Name,
+		MatchmakingMachineName:  game.MatchmakingMachineName,
+		MatchmakingMachinePorts: game.MatchmakingMachinePorts,
+		PlayerIDs:               players,
+	})
+	if err != nil {
+		slog.Error("Failed to spawn machine", "error", err, "gameID", gameID, "players", players)
+		for _, player := range players {
+			server.S.Redis.PublishMatchReady(ctx, gameID, player, "error:failed to spawn machine: "+err.Error())
+		}
+		return err
+	}
+
+	// Store the match connection info in sql
+	match, err := models.MatchStarted(gameID, connInfo, players)
+	if err != nil {
+		slog.Error("Failed to create match", "error", err, "gameID", gameID, "players", players)
+		for _, player := range players {
+			server.S.Redis.PublishMatchReady(ctx, gameID, player, "error:failed to create match: "+err.Error())
+		}
+		return err
+	}
+
+	// Add the match ID to redis store for garbage collection
+	if err := server.S.Redis.AddMatchUnderway(ctx, match.MachineName); err != nil {
+		slog.Error("Failed to add match underway", "error", err, "matchID", match.ID)
+		return err
+	}
+
+	// Notify all players that the match has started
+	for _, player := range players {
+		server.S.Redis.PublishMatchReady(ctx, gameID, player, "match_"+match.ID)
+	}
+
+	return nil
+}
+
 func PairPlayers(ctx context.Context) error {
 	// Get all queue keys
 	keys, err := server.S.Redis.AllQueues(ctx)
@@ -82,6 +123,13 @@ func PairPlayers(ctx context.Context) error {
 		slog.Error("Failed to get all queues", "error", err)
 		return err
 	}
+
+	playerPaired := false
+	defer func() {
+		if playerPaired {
+			server.S.Redis.PublishGarbageCollectionTrigger(ctx)
+		}
+	}()
 
 	for _, key := range keys {
 		gameID := strings.TrimPrefix(key, "queue_")
@@ -114,38 +162,10 @@ func PairPlayers(ctx context.Context) error {
 				continue
 			}
 
-			// Create match
-			connInfo, err := server.S.Machines.CreateServer(ctx, &server.MachineConfig{
-				GameName:                game.Name,
-				MatchmakingMachineName:  game.MatchmakingMachineName,
-				MatchmakingMachinePorts: game.MatchmakingMachinePorts,
-				PlayerIDs:               players,
-			})
-			if err != nil {
-				slog.Error("Failed to spawn machine", "error", err, "gameID", gameID, "players", players)
-				for _, player := range players {
-					server.S.Redis.PublishMatchReady(ctx, gameID, player, "error:failed to spawn machine: "+err.Error())
-				}
+			if err := startMatch(ctx, gameID, game, players); err != nil {
 				continue
 			}
-
-			// Store match info
-			match, err := models.MatchStarted(gameID, connInfo, players)
-			if err != nil {
-				slog.Error("Failed to create match", "error", err, "gameID", gameID, "players", players)
-				for _, player := range players {
-					server.S.Redis.PublishMatchReady(ctx, gameID, player, "error:failed to create match: "+err.Error())
-				}
-				continue
-			}
-			if err := server.S.Redis.AddMatchUnderway(ctx, match.MachineName); err != nil {
-				slog.Error("Failed to add match underway", "error", err, "matchID", match.ID)
-				continue
-			}
-			// Notify players that they are ready
-			for _, player := range players {
-				server.S.Redis.PublishMatchReady(ctx, gameID, player, "match_"+match.ID)
-			}
+			playerPaired = true
 		}
 	}
 

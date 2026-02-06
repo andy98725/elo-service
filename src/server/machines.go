@@ -71,7 +71,7 @@ func (h *HetznerConnection) CreateServer(ctx context.Context, config *MachineCon
 	slog.Info("Creating server", "serverName", serverName)
 	createOpts := hcloud.ServerCreateOpts{
 		Name:       serverName,
-		ServerType: &hcloud.ServerType{Name: "cx22", Architecture: hcloud.ArchitectureX86, CPUType: hcloud.CPUTypeShared},
+		ServerType: &hcloud.ServerType{Name: "cx23", Architecture: hcloud.ArchitectureX86, CPUType: hcloud.CPUTypeShared},
 		Labels:     map[string]string{"game": sanitizedGameName},
 		Image:      &hcloud.Image{Name: "ubuntu-24.04"},
 		// SSHKeys:    []*hcloud.SSHKey{h.sshKey},

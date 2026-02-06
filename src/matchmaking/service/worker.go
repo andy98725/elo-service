@@ -30,6 +30,7 @@ func RunWorker(ctx context.Context, shutdown chan struct{}) {
 			return
 		}
 		lastPairing = time.Now()
+
 		if err := matchmaking.PairPlayers(ctx); err != nil {
 			slog.Error("Failed to pair players", "error", err)
 		}
@@ -39,6 +40,7 @@ func RunWorker(ctx context.Context, shutdown chan struct{}) {
 			return
 		}
 		lastGC = time.Now()
+
 		if err := matchmaking.GarbageCollectMatches(ctx); err != nil {
 			slog.Error("Failed to garbage collect matches", "error", err)
 		}

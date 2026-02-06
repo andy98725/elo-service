@@ -12,5 +12,6 @@
 
 ## Hetzner machines
 
+- [ ] Add warm pool
 - [ ] Add SSH key
 - [ ] Pre-bake snapshots for startup time (use route to trigger)

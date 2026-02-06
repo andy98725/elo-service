@@ -140,7 +140,7 @@ func (r *Redis) MatchStartedAt(ctx context.Context, machineName string) (time.Ti
 	return r.Client.Get(ctx, "machine_"+machineName).Time()
 }
 
-const MatchmakingTriggerChannel = "matchmaking_trigger"
+const MatchmakingTriggerChannel = "trigger_matchmaking"
 
 func (r *Redis) SubscribeMatchmakingTrigger(ctx context.Context) *redis.PubSub {
 	return r.Client.Subscribe(ctx, MatchmakingTriggerChannel)
@@ -150,7 +150,7 @@ func (r *Redis) PublishMatchmakingTrigger(ctx context.Context) error {
 	return r.Client.Publish(ctx, MatchmakingTriggerChannel, "1").Err()
 }
 
-const GarbageCollectionTriggerChannel = "garbage_collection_trigger"
+const GarbageCollectionTriggerChannel = "trigger_garbage_collection"
 
 func (r *Redis) SubscribeGarbageCollectionTrigger(ctx context.Context) *redis.PubSub {
 	return r.Client.Subscribe(ctx, GarbageCollectionTriggerChannel)
