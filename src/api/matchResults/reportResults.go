@@ -44,7 +44,7 @@ func EndMatch(ctx context.Context, match *models.Match, winnerID string, reason 
 		return errors.New("match not underway")
 	}
 
-	logsKey, err := models.SaveMatchLogs(match.ID)
+	logsKey, err := saveMatchLogs(match.ID)
 	if err != nil {
 		slog.Error("Failed to save match logs", "error", err, "matchID", match.ID)
 		return err

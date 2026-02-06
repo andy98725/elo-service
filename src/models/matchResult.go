@@ -1,9 +1,6 @@
 package models
 
 import (
-	"context"
-	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
@@ -157,28 +154,4 @@ func CanUserSeeMatchResult(userID string, matchResultID string) (bool, error) {
 	}
 
 	return false, nil
-}
-
-func SaveMatchLogs(matchID string) (string, error) {
-	match, err := GetMatch(matchID)
-	if err != nil {
-		return "", err
-	}
-
-	if match.MachineLogsPort == 0 {
-		return "", nil
-	}
-
-	resp, err := http.Get(fmt.Sprintf("http://%s:%d/logs", match.MachineIP, match.MachineLogsPort))
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	logsKey, err := server.S.AWS.UploadLogs(context.Background(), resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	return logsKey, nil
 }
