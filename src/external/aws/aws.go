@@ -50,7 +50,7 @@ func (c *AWSClient) UploadLogs(ctx context.Context, body []byte) (string, error)
 	return key, nil
 }
 
-func (c *AWSClient) GetLogs(ctx context.Context, key string) (io.Reader, error) {
+func (c *AWSClient) GetLogs(ctx context.Context, key string) (io.ReadCloser, error) {
 	resp, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucketName),
 		Key:    aws.String("logs/" + key),

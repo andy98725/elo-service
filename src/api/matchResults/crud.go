@@ -11,10 +11,7 @@ import (
 
 func GetMatchResult(ctx echo.Context) error {
 	matchID := ctx.Param("matchID")
-	userID, err := models.UserIDFromContext(ctx)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "error getting user: "+err.Error())
-	}
+	id := ctx.Get("id").(string)
 
 	matchResult, err := models.GetMatchResult(matchID)
 	if err == gorm.ErrRecordNotFound {
@@ -23,7 +20,7 @@ func GetMatchResult(ctx echo.Context) error {
 		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}
 
-	if canSee, err := models.CanUserSeeMatchResult(userID, matchID); err != nil {
+	if canSee, err := models.CanUserSeeMatchResult(id, matchID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "error checking if user can see match result: "+err.Error())
 	} else if !canSee {
 		return echo.NewHTTPError(http.StatusNotFound, "Match result not found")
@@ -34,10 +31,7 @@ func GetMatchResult(ctx echo.Context) error {
 
 func GetMatchResultsOfGame(ctx echo.Context) error {
 	gameID := ctx.Param("gameID")
-	userID, err := models.UserIDFromContext(ctx)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "error getting user: "+err.Error())
-	}
+	id := ctx.Get("id").(string)
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
 		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
@@ -50,7 +44,7 @@ func GetMatchResultsOfGame(ctx echo.Context) error {
 
 	matchResultsResp := []models.MatchResultResp{}
 	for _, matchResult := range matchResults {
-		if canSee, err := models.CanUserSeeMatchResult(userID, matchResult.ID); err != nil {
+		if canSee, err := models.CanUserSeeMatchResult(id, matchResult.ID); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "error checking if user can see match result: "+err.Error())
 		} else if !canSee {
 			continue
@@ -62,17 +56,13 @@ func GetMatchResultsOfGame(ctx echo.Context) error {
 }
 
 func GetMatchResultsOfUser(ctx echo.Context) error {
-	userID, err := models.UserIDFromContext(ctx)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "error getting user: "+err.Error())
-	}
-
+	id := ctx.Get("id").(string)
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
 		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
 	}
 
-	matchResults, nextPage, err := models.GetMatchResultsOfPlayer(userID, page, pageSize)
+	matchResults, nextPage, err := models.GetMatchResultsOfPlayer(id, page, pageSize)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}

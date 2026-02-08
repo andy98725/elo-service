@@ -13,9 +13,9 @@ func InitRoutes(e *echo.Echo) error {
 
 	// CRUD
 	// TODO: Allow guests to access these routes
-	e.GET("/results/:matchID", GetMatchResult, auth.RequireUserAuth)
-	e.GET("/game/:gameID/results", GetMatchResultsOfGame, auth.RequireUserAuth)
-	e.GET("/user/results", GetMatchResultsOfUser, auth.RequireUserAuth)
+	e.GET("/results/:matchID", GetMatchResult, auth.RequireUserOrGuestAuth)
+	e.GET("/game/:gameID/results", GetMatchResultsOfGame, auth.RequireUserOrGuestAuth)
+	e.GET("/user/results", GetMatchResultsOfUser, auth.RequireUserOrGuestAuth)
 	e.GET("/results", GetMatchResults, auth.RequireAdmin)
 	return nil
 }

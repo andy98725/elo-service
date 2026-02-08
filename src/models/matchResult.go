@@ -160,11 +160,36 @@ func CanUserSeeMatchResult(userID string, matchResultID string) (bool, error) {
 	if matchResult.Game.OwnerID == userID {
 		return true, nil
 	}
-	// If user is a player in the match, they can see the match result
+	// If user is a player or guest in the match, they can see the match result
 	for _, player := range matchResult.Players {
 		if player.ID == userID {
 			return true, nil
 		}
+	}
+	for _, guestID := range matchResult.GuestIDs {
+		if guestID == userID {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func IsUserMatchResultAdmin(userID string, matchResultID string) (bool, error) {
+	user, err := GetById(userID)
+	if err != nil {
+		return false, err
+	}
+	if user.IsAdmin {
+		return true, nil
+	}
+
+	matchResult, err := GetMatchResult(matchResultID)
+	if err != nil {
+		return false, err
+	}
+	if matchResult.Game.OwnerID == userID {
+		return true, nil
 	}
 
 	return false, nil

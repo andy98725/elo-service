@@ -21,9 +21,10 @@ const (
 )
 
 type UserClaims struct {
-	UserID      string `json:"user_id"`
-	DisplayName string `json:"display_name"`
-	Username    string `json:"username"`
+	UserID          string `json:"user_id"`
+	DisplayName     string `json:"display_name"`
+	Username        string `json:"username"`
+	ImpersonationID string `json:"impersonation_id"`
 	jwt.StandardClaims
 }
 

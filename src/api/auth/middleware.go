@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/andy98725/elo-service/src/models"
+	"github.com/andy98725/elo-service/src/util"
 	"github.com/labstack/echo"
 )
 
@@ -27,8 +28,30 @@ func RequireUserOrGuestAuth(next echo.HandlerFunc) echo.HandlerFunc {
 				return echo.NewHTTPError(http.StatusInternalServerError, "Error getting user: "+err.Error())
 			}
 
-			c.Set("user", user)
-			c.Set("id", claims.UserID)
+			// Allow admins to impersonate users or guests
+			if user.IsAdmin && claims.ImpersonationID != "" {
+				claims.UserID = claims.ImpersonationID
+
+				if util.IsGuestID(claims.ImpersonationID) {
+					c.Set("guest", models.Guest{
+						ID:          claims.ImpersonationID,
+						DisplayName: claims.DisplayName,
+					})
+					c.Set("id", claims.ImpersonationID)
+				} else {
+					user, err = models.GetById(claims.ImpersonationID)
+					if err != nil {
+						slog.Error("Error getting user", "error", err)
+						return echo.NewHTTPError(http.StatusInternalServerError, "Error getting user: "+err.Error())
+					}
+
+					c.Set("user", user)
+					c.Set("id", claims.ImpersonationID)
+				}
+			} else {
+				c.Set("user", user)
+				c.Set("id", claims.UserID)
+			}
 			return next(c)
 		}
 
@@ -68,9 +91,19 @@ func RequireUserAuth(next echo.HandlerFunc) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Error getting user: "+err.Error())
 		}
 
-		// Add claims to context
-		c.Set("user", user)
-		c.Set("id", claims.UserID)
+		// Allow admins to impersonate users
+		if user.IsAdmin && claims.ImpersonationID != "" {
+			user, err = models.GetById(claims.ImpersonationID)
+			if err != nil {
+				slog.Error("Error getting user", "error", err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "Error getting user: "+err.Error())
+			}
+			c.Set("user", user)
+			c.Set("id", claims.ImpersonationID)
+		} else {
+			c.Set("user", user)
+			c.Set("id", claims.UserID)
+		}
 
 		return next(c)
 	}

@@ -57,10 +57,10 @@ func GetMatchLogs(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "error getting match result: "+err.Error())
 	}
 
-	if canSee, err := models.CanUserSeeMatchResult(userID, matchID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "error checking if user can see match result: "+err.Error())
-	} else if !canSee {
-		return echo.NewHTTPError(http.StatusNotFound, "Match result not found")
+	if isAdmin, err := models.IsUserMatchResultAdmin(userID, matchID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "error checking if user is admin: "+err.Error())
+	} else if !isAdmin {
+		return echo.NewHTTPError(http.StatusForbidden, "You are not authorized to access this.")
 	}
 
 	if matchResult.LogsKey == "" {
@@ -71,6 +71,7 @@ func GetMatchLogs(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "error getting logs: "+err.Error())
 	}
+	defer logs.Close()
 
 	return ctx.Stream(http.StatusOK, "text/plain", logs)
 }
