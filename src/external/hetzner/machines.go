@@ -47,10 +47,11 @@ type MachineConfig struct {
 }
 
 type MachineConnectionInfo struct {
-	MachineID string
-	AuthCode  string
-	PublicIP  string
-	LogsPort  int64
+	MachineName string
+	MachineID   int64
+	AuthCode    string
+	PublicIP    string
+	LogsPort    int64
 }
 
 var sanitizeRegex = regexp.MustCompile(`[^a-zA-Z0-9]`)
@@ -104,15 +105,16 @@ func (h *HetznerConnection) CreateServer(ctx context.Context, config *MachineCon
 	}
 
 	return &MachineConnectionInfo{
-		MachineID: serverName,
-		AuthCode:  token,
-		PublicIP:  publicIP,
-		LogsPort:  logsPort,
+		MachineName: serverName,
+		MachineID:   server.Server.ID,
+		AuthCode:    token,
+		PublicIP:    publicIP,
+		LogsPort:    logsPort,
 	}, nil
 }
 
-func (h *HetznerConnection) DeleteServer(ctx context.Context, machineName string) error {
-	res, _, err := h.client.Server.DeleteWithResult(ctx, &hcloud.Server{Name: machineName})
+func (h *HetznerConnection) DeleteServer(ctx context.Context, machineID int64) error {
+	res, _, err := h.client.Server.DeleteWithResult(ctx, &hcloud.Server{ID: machineID})
 	if err != nil {
 		return fmt.Errorf("failed to delete server: %w", err)
 	}

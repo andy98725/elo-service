@@ -15,6 +15,7 @@ type Match struct {
 	GameID          string         `json:"game_id" gorm:"not null"`
 	Game            Game           `json:"game" gorm:"foreignKey:GameID"`
 	MachineName     string         `json:"machine_name" gorm:""`
+	MachineID       int64          `json:"machine_id" gorm:""`
 	MachineIP       string         `json:"machine_ip" gorm:""`
 	MachineLogsPort int64          `json:"machine_logs_port" gorm:""`
 	Players         []User         `json:"players" gorm:"many2many:match_players;"`
@@ -71,7 +72,8 @@ func MatchStarted(gameID string, connInfo *hetzner.MachineConnectionInfo, player
 		GameID:          gameID,
 		Players:         users,
 		GuestIDs:        guestIDs,
-		MachineName:     connInfo.MachineID,
+		MachineName:     connInfo.MachineName,
+		MachineID:       connInfo.MachineID,
 		AuthCode:        connInfo.AuthCode,
 		MachineIP:       connInfo.PublicIP,
 		MachineLogsPort: connInfo.LogsPort,

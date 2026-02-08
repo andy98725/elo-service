@@ -57,8 +57,9 @@ func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reas
 		slog.Error("Failed to report match result", "error", err, "matchID", match.ID)
 		return "", err
 	}
-	if err := server.S.Machines.DeleteServer(ctx, match.MachineName); err != nil {
-		slog.Error("Failed to stop machine. Machine will continue to run.", "error", err, "matchID", match.ID, "MachineName", match.MachineName)
+	if err := server.S.Machines.DeleteServer(ctx, match.MachineID); err != nil {
+		slog.Error("Failed to stop machine. Machine will continue to run.", "error", err,
+			"matchID", match.ID, "MachineName", match.MachineName, "MachineID", match.MachineID)
 		return "", err
 	}
 
