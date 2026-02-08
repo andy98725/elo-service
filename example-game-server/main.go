@@ -146,6 +146,14 @@ func (gs *GameServer) shutdown() {
 	close(gs.shutdownChan)
 }
 
+// corsMiddleware wraps a handler to add CORS support and handle preflight requests.
+func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		next(w, r)
+	}
+}
+
 // Health check handler
 func (gs *GameServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -200,6 +208,7 @@ func (gs *GameServer) handleHTTPJoin(w http.ResponseWriter, r *http.Request) {
 
 	if gs.addPlayer(playerID) {
 		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, "Player %s joined successfully. Players: %d/%d",
 			playerID, len(gs.getPlayerList()), len(gs.expectedPlayers))
 	} else {
@@ -274,8 +283,8 @@ func main() {
 
 	// Start HTTP server
 	go func() {
-		http.HandleFunc("/join", gameServer.handleHTTPJoin)
-		http.HandleFunc("/health", gameServer.handleHealth)
+		http.HandleFunc("/join", corsMiddleware(gameServer.handleHTTPJoin))
+		http.HandleFunc("/health", corsMiddleware(gameServer.handleHealth))
 		log.Printf("HTTP server listening on port %d", httpPort)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP server failed: %v", err)
