@@ -1,6 +1,7 @@
 package models
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
@@ -9,28 +10,26 @@ import (
 )
 
 type MatchResult struct {
-	ID            string         `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	GameID        string         `json:"game_id" gorm:"not null"`
-	Game          Game           `json:"game" gorm:"foreignKey:GameID"`
-	Players       []User         `json:"players" gorm:"many2many:match_result_players;"`
-	GuestIDs      pq.StringArray `json:"guest_ids" gorm:"type:text[];default:'{}'"`
-	GuestWinnerID string         `json:"guest_winner_id" gorm:""`
-	WinnerID      string         `json:"winner_id"`
-	Winner        User           `json:"winner" gorm:"foreignKey:WinnerID"`
-	Result        string         `json:"result" gorm:"not null"`
-	LogsKey       string         `json:"logs_key"`
-	IsPublic      bool           `json:"is_public" gorm:"default:false"`
-	CreatedAt     time.Time      `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt     time.Time      `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	ID        string         `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	GameID    string         `json:"game_id" gorm:"not null"`
+	Game      Game           `json:"game" gorm:"foreignKey:GameID"`
+	Players   []User         `json:"players" gorm:"many2many:match_result_players;"`
+	GuestIDs  pq.StringArray `json:"guest_ids" gorm:"type:text[];default:'{}'"`
+	WinnerIDs pq.StringArray `json:"winner_ids" gorm:"type:text[];default:'{}'"`
+	Result    string         `json:"result" gorm:"not null"`
+	LogsKey   string         `json:"logs_key"`
+	IsPublic  bool           `json:"is_public" gorm:"default:false"`
+	CreatedAt time.Time      `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt time.Time      `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 }
 
 type MatchResultResp struct {
-	ID       string     `json:"id"`
-	GameID   string     `json:"game_id"`
-	Players  []UserResp `json:"players"`
-	GuestIDs []string   `json:"guest_ids"`
-	WinnerID string     `json:"winner_id"`
-	Result   string     `json:"result"`
+	ID        string     `json:"id"`
+	GameID    string     `json:"game_id"`
+	Players   []UserResp `json:"players"`
+	GuestIDs  []string   `json:"guest_ids"`
+	WinnerIDs []string   `json:"winner_ids"`
+	Result    string     `json:"result"`
 }
 
 func (m *MatchResult) ToResp() *MatchResultResp {
@@ -38,22 +37,18 @@ func (m *MatchResult) ToResp() *MatchResultResp {
 	for i, player := range m.Players {
 		playersResp[i] = *player.ToResp()
 	}
-	winner := m.WinnerID
-	if winner == "" {
-		winner = m.GuestWinnerID
-	}
 
 	return &MatchResultResp{
-		ID:       m.ID,
-		GameID:   m.GameID,
-		Players:  playersResp,
-		GuestIDs: m.GuestIDs,
-		WinnerID: winner,
-		Result:   m.Result,
+		ID:        m.ID,
+		GameID:    m.GameID,
+		Players:   playersResp,
+		GuestIDs:  m.GuestIDs,
+		WinnerIDs: m.WinnerIDs,
+		Result:    m.Result,
 	}
 }
 
-func MatchEnded(matchID string, winnerID string, result string, logsKey string) (*MatchResult, error) {
+func MatchEnded(matchID string, winnerIDs []string, result string, logsKey string) (*MatchResult, error) {
 	match, err := GetMatch(matchID)
 	if err != nil {
 		return nil, err
@@ -62,26 +57,17 @@ func MatchEnded(matchID string, winnerID string, result string, logsKey string) 
 	if err != nil {
 		return nil, err
 	}
-	var winID string
-	var guestWinID string
-	if len(winnerID) > 2 && winnerID[:2] == "g_" {
-		guestWinID = winnerID
-		winID = ""
-	} else {
-		guestWinID = ""
-		winID = winnerID
-	}
 
 	matchResult := &MatchResult{
-		GameID:        match.GameID,
-		Players:       match.Players,
-		GuestIDs:      match.GuestIDs,
-		WinnerID:      winID,
-		GuestWinnerID: guestWinID,
-		Result:        result,
-		LogsKey:       logsKey,
-		IsPublic:      game.PublicResults,
+		GameID:    match.GameID,
+		Players:   match.Players,
+		GuestIDs:  match.GuestIDs,
+		WinnerIDs: winnerIDs,
+		Result:    result,
+		LogsKey:   logsKey,
+		IsPublic:  game.PublicResults,
 	}
+	slog.Info("Match ended", "matchID", matchID, "winnerIDs", winnerIDs, "result", result, "logsKey", logsKey)
 
 	// Report result and delete match in one transaction
 	err = server.S.DB.Transaction(func(tx *gorm.DB) error {
