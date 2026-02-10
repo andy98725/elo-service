@@ -158,3 +158,19 @@ func DeleteGame(ctx echo.Context) error {
 
 	return ctx.JSON(http.StatusOK, echo.Map{"message": "Game deleted successfully"})
 }
+
+// func CreateGameSnapshot(ctx echo.Context) error {
+// 	id := ctx.Param("id")
+// 	if id == "" {
+// 		return echo.NewHTTPError(http.StatusBadRequest, "Game ID is required")
+// 	}
+
+// 	game, err := models.GetGame(id)
+// 	if err != nil {
+// 		return echo.NewHTTPError(http.StatusInternalServerError, "Error getting game: "+err.Error())
+// 	}
+
+// 	snapshot, err := server.S.Machines.CreateSnapshot(ctx, game)
+
+// 	return ctx.JSON(http.StatusOK, game.ToResp())
+// }

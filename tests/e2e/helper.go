@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"testing"
@@ -12,16 +13,29 @@ import (
 )
 
 func DoReq(t *testing.T, reqType string, url string, body any, token string, expectedStatusCode int) map[string]interface{} {
-	bodyBytes, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("failed to marshal request body: %v", err)
+	var bodyBytes []byte
+	var contentType string
+	switch b := body.(type) {
+	case string:
+		bodyBytes = []byte(b)
+		contentType = "text/plain; charset=utf-8"
+	case nil:
+		bodyBytes = []byte("")
+		contentType = "application/json"
+	default:
+		var err error
+		bodyBytes, err = json.Marshal(body)
+		if err != nil {
+			t.Fatalf("failed to marshal request body: %v", err)
+		}
+		contentType = "application/json"
 	}
 
 	req, err := http.NewRequest(reqType, url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		t.Fatalf("failed to create new request: %v", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -32,15 +46,23 @@ func DoReq(t *testing.T, reqType string, url string, body any, token string, exp
 	}
 	defer resp.Body.Close()
 
+	bodyBytes, err = io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("request: failed to read response body: %v", err)
+	}
+	bodyString := string(bodyBytes)
 	if resp.StatusCode != expectedStatusCode {
-		t.Fatalf("request: expected status 200, got %d", resp.StatusCode)
+		t.Fatalf("request: expected status 200, got %d. Response: %+v", resp.StatusCode, bodyString)
 	}
 
 	var response map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		t.Fatalf("request: failed to decode response: %v", err)
+	if err := json.Unmarshal(bodyBytes, &response); err == nil {
+		return response
+	} else {
+		return map[string]interface{}{
+			"response": bodyString,
+		}
 	}
-	return response
 }
 
 func WebsocketConnect(t *testing.T, rawURL string, token string) *websocket.Conn {

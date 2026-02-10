@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -113,6 +114,55 @@ func (h *HetznerConnection) CreateServer(ctx context.Context, config *MachineCon
 	}, nil
 }
 
+// Snapshots won't work with the current implementation because the player IDs are baked into the hetzner user data.
+// To be able to do this, we'd need to pass player IDs at runtime.
+// This would be a good change because then it allows us to warm pool servers.
+
+// func (h *HetznerConnection) CreateSnapshot(ctx context.Context, config *MachineConfig) (int64, error) {
+// 	// Start server
+// 	serverConn, err := h.CreateServer(ctx, config)
+// 	if err != nil {
+// 		return 0, fmt.Errorf("failed to create server: %w", err)
+// 	}
+// 	if err := waitForServerHealth(ctx, serverConn, 100*time.Millisecond, 2*time.Minute); err != nil {
+// 		return 0, fmt.Errorf("failed to wait for server health: %w", err)
+// 	}
+
+// 	// Snapshot
+// 	sanitizedGameName := sanitizeRegex.ReplaceAllString(config.GameName, "")
+// 	snapshot, _, err := h.client.Server.CreateImage(ctx, &hcloud.Server{ID: serverConn.MachineID}, &hcloud.ServerCreateImageOpts{
+// 		Type:        hcloud.ImageTypeSnapshot,
+// 		Description: &sanitizedGameName,
+// 		Labels:      map[string]string{"game": sanitizedGameName},
+// 	})
+// 	if err != nil {
+// 		return 0, fmt.Errorf("failed to create snapshot: %w", err)
+// 	}
+// 	// Delete server
+// 	if err := h.DeleteServer(ctx, serverConn.MachineID); err != nil {
+// 		return 0, fmt.Errorf("failed to delete server: %w", err)
+// 	}
+
+// 	return snapshot.Image.ID, nil
+// }
+
+func waitForServerHealth(ctx context.Context, serverConn *MachineConnectionInfo, interval, timeout time.Duration) error {
+	healthURL := fmt.Sprintf("http://%s:%d/health", serverConn.PublicIP, serverConn.LogsPort)
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		resp, err := http.DefaultClient.Get(healthURL)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		time.Sleep(interval)
+	}
+
+	return fmt.Errorf("health check did not return 200 within %v: GET %s", timeout, healthURL)
+}
 func (h *HetznerConnection) DeleteServer(ctx context.Context, machineID int64) error {
 	res, _, err := h.client.Server.DeleteWithResult(ctx, &hcloud.Server{ID: machineID})
 	if err != nil {

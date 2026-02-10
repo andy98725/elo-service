@@ -202,7 +202,7 @@ func (gs *GameServer) handleHTTPJoin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !gs.expectedPlayers[playerID] {
-		http.Error(w, "Player not expected in this game", http.StatusForbidden)
+		http.Error(w, fmt.Sprintf("Player %s not expected in this game", playerID), http.StatusForbidden)
 		return
 	}
 

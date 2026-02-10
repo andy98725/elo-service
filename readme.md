@@ -21,13 +21,9 @@ Redis is hosted on [Upstash](https://console.upstash.com/redis?teamid=0).
 
 
 ## Local
-Populate the .env with something like
+Run
 ```
-
-```
-Then run
-```
-go run ./src
+make up
 ```
 
 Connect locally to postgres
@@ -40,19 +36,23 @@ To connect to redis
 redis-cli -h localhost -p 6379
 ```
 
+To connect to staging locally, populate the .env file, then run
+```
+go run ./src
+```
+
 
 ## Staging
+
 To connect to fly.io
 ```
 flyctl auth login
 ```
 
-To connect to postgres
-```
-fly postgres connect -a elo-service-stg-db
-```
+To connect to postgres, use the [dashboard](https://console.neon.tech/app/projects/old-shadow-44280217/branches/br-nameless-feather-afzllkpa/tables)
+or get the connection details from the [branch overview](https://console.neon.tech/app/projects/old-shadow-44280217/branches/br-nameless-feather-afzllkpa?branchId=br-nameless-feather-afzllkpa&database=neondb)
 
-To connect to redis
-```
-fly redis connect
-```
+To connect to redis, use the [dashboard](https://console.upstash.com/redis/22ddac14-a684-4547-9b8e-a7ec313da40f/cli?teamid=0)
+or get the connection details under Endpoint on the [details page](https://console.upstash.com/redis/22ddac14-a684-4547-9b8e-a7ec313da40f/details?teamid=0)
+
+For hetzner, see the 
