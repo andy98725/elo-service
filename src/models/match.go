@@ -177,7 +177,7 @@ func CanUserSeeMatch(userID string, matchID string) (bool, error) {
 	}
 
 	// Admin can see all match results
-	if user, err := GetById(userID); err != nil && user.IsAdmin {
+	if user, err := GetById(userID); err == nil && user.IsAdmin {
 		return true, nil
 	}
 
