@@ -162,12 +162,21 @@ func (h *HetznerConnection) CreateServer(ctx context.Context, config *MachineCon
 //		return fmt.Errorf("health check did not return 200 within %v: GET %s", timeout, healthURL)
 //	}
 func (h *HetznerConnection) DeleteServer(ctx context.Context, machineID int64, machineName string) error {
-	res, _, err := h.client.Server.DeleteWithResult(ctx, &hcloud.Server{ID: machineID, Name: machineName})
+	shutdown, _, err := h.client.Server.Shutdown(ctx, &hcloud.Server{ID: machineID, Name: machineName})
+	if err != nil {
+		return fmt.Errorf("failed to shutdown server: %w", err)
+	}
+	if shutdown.Status != "success" {
+		return fmt.Errorf("failed to shutdown server: %s", shutdown.Status)
+	}
+	h.client.Action.WaitFor(ctx, shutdown)
+
+	delete, _, err := h.client.Server.DeleteWithResult(ctx, &hcloud.Server{ID: machineID, Name: machineName})
 	if err != nil {
 		return fmt.Errorf("failed to delete server: %w", err)
 	}
-	if res.Action.Status != "success" {
-		return fmt.Errorf("failed to delete server: %s", res.Action.Status, "action", res.Action)
+	if delete.Action.Status != "success" {
+		return fmt.Errorf("failed to delete server: %s", delete.Action.Status, "action", delete.Action)
 	}
 	return nil
 }
