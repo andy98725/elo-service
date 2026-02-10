@@ -23,6 +23,10 @@ func RunWorker(ctx context.Context, shutdown chan struct{}) {
 	pairingCh := matchmakingPubsub.Channel()
 	gcCh := garbageCollectionPubsub.Channel()
 
+	// Run each once at start
+	server.S.Redis.PublishMatchmakingTrigger(ctx)
+	server.S.Redis.PublishGarbageCollectionTrigger(ctx)
+
 	// TODO: Bump go version and use "golang.org/x/time/rate" package
 	var lastPairing, lastGC time.Time
 	runPairing := func() {

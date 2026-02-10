@@ -30,7 +30,6 @@ type Game struct {
 
 	// TODO separate into leaderboard if needed
 	GuestsAllowed          bool   `json:"guests_allowed" gorm:"default:true"`
-	PublicResults          bool   `json:"public_results" gorm:"default:false"`
 	LobbySize              int    `json:"lobby_size" gorm:"default:2"`
 	MatchmakingStrategy    string `json:"matchmaking_strategy" gorm:"not null;default:'random'"`
 	MatchmakingMachineName string `json:"matchmaking_machine_name" gorm:"not null"`
@@ -38,6 +37,8 @@ type Game struct {
 	MatchmakingMachinePorts pq.Int64Array `json:"matchmaking_machine_ports" gorm:"type:integer[];default:'{}'"`
 	ELOStrategy             string        `json:"elo_strategy" gorm:"not null;default:'unranked'"`
 	DefaultRating           int           `json:"default_rating" gorm:"default:1000"`
+	PublicResults           bool          `json:"public_results" gorm:"default:true"`
+	PublicMatchLogs         bool          `json:"public_match_logs" gorm:"default:true"`
 }
 
 type GameResp struct {
@@ -78,6 +79,8 @@ type CreateGameParams struct {
 	MatchmakingMachineName  string
 	MatchmakingMachinePorts []int64
 	ELOStrategy             string
+	PublicMatchResults      bool
+	PublicMatchLogs         bool
 }
 
 func CreateGame(params CreateGameParams, owner User) (*Game, error) {
@@ -109,6 +112,7 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		MatchmakingMachineName:  params.MatchmakingMachineName,
 		MatchmakingMachinePorts: pq.Int64Array(params.MatchmakingMachinePorts),
 		ELOStrategy:             params.ELOStrategy,
+		PublicMatchLogs:         params.PublicMatchLogs,
 	}
 
 	result := server.S.DB.Create(game)
@@ -155,6 +159,8 @@ type UpdateGameParams struct {
 	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
 	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
 	ELOStrategy             string  `json:"elo_strategy"`
+	PublicResults           *bool   `json:"public_match_results"`
+	PublicMatchLogs         *bool   `json:"public_match_logs"`
 }
 
 func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
@@ -196,6 +202,12 @@ func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
 	}
 	if params.ELOStrategy != "" {
 		game.ELOStrategy = params.ELOStrategy
+	}
+	if params.PublicResults != nil {
+		game.PublicResults = *params.PublicResults
+	}
+	if params.PublicMatchLogs != nil {
+		game.PublicMatchLogs = *params.PublicMatchLogs
 	}
 
 	result := server.S.DB.Save(game)

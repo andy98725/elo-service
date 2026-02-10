@@ -1,7 +1,3 @@
-// E2E test for guest login. Run with:
-//
-//	go test -v -run TestMatchReportsResult ./tests/e2e -args -url http://localhost:8080
-//	go test -v -run TestMatchReportsResult ./tests/e2e -args -url https://elo-service.fly.dev
 package e2e
 
 import (
@@ -16,6 +12,8 @@ import (
 
 var exampleGameID = "b2b8f32d-763e-4a63-b1ec-121a65e376f2"
 
+// go test -v -run TestMatchReportsResult ./tests/e2e -args -url http://localhost:8080
+// go test -v -run TestMatchReportsResult ./tests/e2e -args -url https://elo-service.fly.dev
 func TestMatchReportsResult(t *testing.T) {
 	flag.Parse()
 
@@ -28,6 +26,9 @@ func TestMatchReportsResult(t *testing.T) {
 	guest2Token := strings.TrimSpace(guest2["token"].(string))
 	guest2ID := strings.TrimSpace(guest2["id"].(string))
 	t.Logf("Guest 1: %s, Guest 2: %s", guest1ID, guest2ID)
+
+	initialResults := DoReq(t, "GET", fmt.Sprintf("%s/user/results", *baseURL), nil, guest1Token, http.StatusOK)
+	t.Logf("Initial results: %+v", initialResults)
 
 	// Ensure nobody in queue
 	queueResponse := DoReq(t, "GET", fmt.Sprintf("%s/match/size?gameID=%s", *baseURL, exampleGameID), nil, guest1Token, http.StatusOK)
@@ -68,6 +69,7 @@ func TestMatchReportsResult(t *testing.T) {
 			case "error":
 				t.Fatalf("%s: received error: %+v", name, resp["error"])
 			default:
+				t.Logf("%s: received message: %+v", name, resp)
 				continue
 			}
 		}
@@ -107,6 +109,7 @@ func TestMatchReportsResult(t *testing.T) {
 		t.Fatalf("expected at least one game result, got %d", len(gameResults["matchResults"].([]interface{})))
 	}
 	gameResult := gameResults["matchResults"].([]interface{})[0].(map[string]interface{})
+	t.Logf("Game result: %+v", gameResult)
 	gameResultID := gameResult["id"].(string)
 	serverLogs := DoReq(t, "GET", fmt.Sprintf("%s/results/%s/logs", *baseURL, gameResultID), nil, guest1Token, http.StatusOK)
 	t.Logf("Server logs: %+v", serverLogs)

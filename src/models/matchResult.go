@@ -18,7 +18,6 @@ type MatchResult struct {
 	WinnerIDs pq.StringArray `json:"winner_ids" gorm:"type:text[];default:'{}'"`
 	Result    string         `json:"result" gorm:"not null"`
 	LogsKey   string         `json:"logs_key"`
-	IsPublic  bool           `json:"is_public" gorm:"default:false"`
 	CreatedAt time.Time      `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 	UpdatedAt time.Time      `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 }
@@ -53,10 +52,6 @@ func MatchEnded(matchID string, winnerIDs []string, result string, logsKey strin
 	if err != nil {
 		return nil, err
 	}
-	game, err := GetGame(match.GameID)
-	if err != nil {
-		return nil, err
-	}
 
 	matchResult := &MatchResult{
 		GameID:    match.GameID,
@@ -65,7 +60,6 @@ func MatchEnded(matchID string, winnerIDs []string, result string, logsKey strin
 		WinnerIDs: winnerIDs,
 		Result:    result,
 		LogsKey:   logsKey,
-		IsPublic:  game.PublicResults,
 	}
 	slog.Info("Match ended", "matchID", matchID, "winnerIDs", winnerIDs, "result", result, "logsKey", logsKey)
 
@@ -143,7 +137,7 @@ func CanUserSeeMatchResult(userID string, matchResultID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if matchResult.IsPublic {
+	if matchResult.Game.PublicResults {
 		return true, nil
 	}
 

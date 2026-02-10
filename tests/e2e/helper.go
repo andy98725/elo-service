@@ -52,6 +52,7 @@ func DoReq(t *testing.T, reqType string, url string, body any, token string, exp
 	}
 	bodyString := string(bodyBytes)
 	if resp.StatusCode != expectedStatusCode {
+		t.Logf("route failed: %s %s %s %s", url, reqType, bodyString, token)
 		t.Fatalf("request: expected status 200, got %d. Response: %+v", resp.StatusCode, bodyString)
 	}
 

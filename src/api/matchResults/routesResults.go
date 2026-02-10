@@ -9,7 +9,7 @@ import (
 func InitRoutes(e *echo.Echo) error {
 	// Match reporting
 	e.POST("/result/report", ReportResults, middleware.AllowCors())
-	e.GET("/results/:matchID/logs", GetMatchLogs, auth.RequireUserAuth)
+	e.GET("/results/:matchID/logs", GetMatchLogs, auth.RequireUserOrGuestAuth)
 
 	// CRUD
 	e.GET("/results/:matchID", GetMatchResult, auth.RequireUserOrGuestAuth)
