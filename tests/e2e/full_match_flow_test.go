@@ -27,9 +27,6 @@ func TestMatchReportsResult(t *testing.T) {
 	guest2ID := strings.TrimSpace(guest2["id"].(string))
 	t.Logf("Guest 1: %s, Guest 2: %s", guest1ID, guest2ID)
 
-	initialResults := DoReq(t, "GET", fmt.Sprintf("%s/user/results", *baseURL), nil, guest1Token, http.StatusOK)
-	t.Logf("Initial results: %+v", initialResults)
-
 	// Ensure nobody in queue
 	queueResponse := DoReq(t, "GET", fmt.Sprintf("%s/match/size?gameID=%s", *baseURL, exampleGameID), nil, guest1Token, http.StatusOK)
 	t.Logf("Example game has %f players in queue", queueResponse["players_in_queue"].(float64))

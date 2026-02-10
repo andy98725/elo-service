@@ -92,7 +92,7 @@ func MatchStarted(gameID string, connInfo *hetzner.MachineConnectionInfo, player
 
 func GetMatch(matchID string) (*Match, error) {
 	var match Match
-	result := server.S.DB.Preload("Players").First(&match, "id = ?", matchID)
+	result := server.S.DB.Preload("Game").Preload("Players").First(&match, "id = ?", matchID)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -101,7 +101,7 @@ func GetMatch(matchID string) (*Match, error) {
 
 func GetMatchByMachineName(machineName string) (*Match, error) {
 	var match Match
-	result := server.S.DB.Preload("Players").First(&match, "machine_name = ?", machineName)
+	result := server.S.DB.Preload("Game").Preload("Players").First(&match, "machine_name = ?", machineName)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -110,7 +110,7 @@ func GetMatchByMachineName(machineName string) (*Match, error) {
 
 func GetMatchByTokenID(tokenID string) (*Match, error) {
 	var match Match
-	result := server.S.DB.Preload("Players").First(&match, "auth_code = ?", tokenID)
+	result := server.S.DB.Preload("Game").Preload("Players").First(&match, "auth_code = ?", tokenID)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -120,7 +120,7 @@ func GetMatchByTokenID(tokenID string) (*Match, error) {
 func GetMatchesOfGame(gameID string, page, pageSize int) ([]Match, int, error) {
 	var matches []Match
 	offset := page * pageSize
-	result := server.S.DB.Preload("Players").Offset(offset).Limit(pageSize).Find(&matches, "game_id = ?", gameID)
+	result := server.S.DB.Preload("Game").Preload("Players").Offset(offset).Limit(pageSize).Find(&matches, "game_id = ?", gameID)
 	if result.Error != nil {
 		return nil, -1, result.Error
 	}
@@ -135,7 +135,7 @@ func GetMatchesOfGame(gameID string, page, pageSize int) ([]Match, int, error) {
 func GetMatches(page, pageSize int) ([]Match, int, error) {
 	var matches []Match
 	offset := page * pageSize
-	result := server.S.DB.Preload("Players").Offset(offset).Limit(pageSize).Find(&matches)
+	result := server.S.DB.Preload("Game").Preload("Players").Offset(offset).Limit(pageSize).Find(&matches)
 	if result.Error != nil {
 		return nil, -1, result.Error
 	}
@@ -151,7 +151,7 @@ func GetMatchesUnderway(page, pageSize int) ([]Match, int, error) {
 
 	var matches []Match
 	offset := page * pageSize
-	result := server.S.DB.Preload("Players").Offset(offset).Limit(pageSize).Find(&matches, "status = ?", "started")
+	result := server.S.DB.Preload("Game").Preload("Players").Offset(offset).Limit(pageSize).Find(&matches, "status = ?", "started")
 	if result.Error != nil {
 		return nil, -1, result.Error
 	}

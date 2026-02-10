@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
+	"github.com/andy98725/elo-service/src/util"
 	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
@@ -84,7 +85,7 @@ func MatchEnded(matchID string, winnerIDs []string, result string, logsKey strin
 
 func GetMatchResult(matchID string) (*MatchResult, error) {
 	var matchResult MatchResult
-	result := server.S.DB.Preload("Players").First(&matchResult, "id = ?", matchID)
+	result := server.S.DB.Preload("Game").Preload("Players").First(&matchResult, "id = ?", matchID)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -94,7 +95,7 @@ func GetMatchResult(matchID string) (*MatchResult, error) {
 func GetMatchResultsOfGame(gameID string, page, pageSize int) ([]MatchResult, int, error) {
 	var matchResults []MatchResult
 	offset := page * pageSize
-	result := server.S.DB.Preload("Players").Offset(offset).Limit(pageSize).Find(&matchResults, "game_id = ?", gameID)
+	result := server.S.DB.Preload("Game").Preload("Players").Offset(offset).Limit(pageSize).Find(&matchResults, "game_id = ?", gameID)
 	nextPage := page + 1
 	if result.RowsAffected < int64(pageSize) {
 		nextPage = -1
@@ -106,7 +107,7 @@ func GetMatchResultsOfPlayer(playerID string, page, pageSize int) ([]MatchResult
 	var matchResults []MatchResult
 	offset := page * pageSize
 
-	q := server.S.DB.Preload("Players").Offset(offset).Limit(pageSize)
+	q := server.S.DB.Preload("Game").Preload("Players").Offset(offset).Limit(pageSize)
 	if len(playerID) > 2 && playerID[:2] == "g_" {
 		q = q.Where("? = ANY(guest_ids)", playerID)
 	} else {
@@ -124,7 +125,7 @@ func GetMatchResultsOfPlayer(playerID string, page, pageSize int) ([]MatchResult
 func GetMatchResults(page, pageSize int) ([]MatchResult, int, error) {
 	var matchResults []MatchResult
 	offset := page * pageSize
-	result := server.S.DB.Preload("Players").Offset(offset).Limit(pageSize).Find(&matchResults)
+	result := server.S.DB.Preload("Game").Preload("Players").Offset(offset).Limit(pageSize).Find(&matchResults)
 	nextPage := page + 1
 	if result.RowsAffected < int64(pageSize) {
 		nextPage = -1
@@ -166,6 +167,10 @@ func CanUserSeeMatchResult(userID string, matchResultID string) (bool, error) {
 }
 
 func IsUserMatchResultAdmin(userID string, matchResultID string) (bool, error) {
+	if util.IsGuestID(userID) {
+		return false, nil
+	}
+
 	user, err := GetById(userID)
 	if err != nil {
 		return false, err

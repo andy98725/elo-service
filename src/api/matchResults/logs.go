@@ -58,20 +58,18 @@ func GetMatchLogs(ctx echo.Context) error {
 	}
 
 	// AuthZ for logs
-	canSee := false
-	if matchResult.Game.PublicMatchLogs {
-		canSee, err = models.CanUserSeeMatchResult(id, matchID)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "error checking if user can see match result: "+err.Error())
-		}
-	} else {
-		canSee, err = models.IsUserMatchResultAdmin(id, matchID)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "error checking if user is admin: "+err.Error())
-		}
-	}
-	if !canSee {
+	if canSee, err := models.CanUserSeeMatchResult(id, matchID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "error checking if user can see match result: "+err.Error())
+	} else if !canSee {
 		return echo.NewHTTPError(http.StatusNotFound, "Match result not found")
+	}
+
+	if !matchResult.Game.PublicMatchLogs {
+		if isAdmin, err := models.IsUserMatchResultAdmin(id, matchID); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "error checking if user is admin: "+err.Error())
+		} else if !isAdmin {
+			return echo.NewHTTPError(http.StatusForbidden, "Match logs are not public.")
+		}
 	}
 
 	// Pull logs from S3
