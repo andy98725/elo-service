@@ -99,13 +99,15 @@ func TestMatchReportsResult(t *testing.T) {
 	logs := DoReq(t, "GET", fmt.Sprintf("http://%s:9999/logs", serverAddr1), nil, "", http.StatusOK)
 	t.Logf("Server logs: %+v", logs)
 
-	time.Sleep(3 * time.Second)
+	time.Sleep(5 * time.Second)
 	t.Logf("Getting game results...")
-	resp := DoReq(t, "GET", fmt.Sprintf("%s/game/%s/results", *baseURL, exampleGameID), nil, guest1Token, http.StatusOK)
-	t.Logf("Game results: %+v", resp)
+	gameResults := DoReq(t, "GET", fmt.Sprintf("%s/user/results", *baseURL), nil, guest1Token, http.StatusOK)
 
-	time.Sleep(4 * time.Second)
-	logs2 := DoReq(t, "GET", fmt.Sprintf("http://%s:9999/logs", serverAddr1), nil, "", http.StatusOK)
-	t.Logf("Server logs: %+v", logs2)
-
+	if len(gameResults["matchResults"].([]interface{})) == 0 {
+		t.Fatalf("expected at least one game result, got %d", len(gameResults["matchResults"].([]interface{})))
+	}
+	gameResult := gameResults["matchResults"].([]interface{})[0].(map[string]interface{})
+	gameResultID := gameResult["id"].(string)
+	serverLogs := DoReq(t, "GET", fmt.Sprintf("%s/results/%s/logs", *baseURL, gameResultID), nil, guest1Token, http.StatusOK)
+	t.Logf("Server logs: %+v", serverLogs)
 }

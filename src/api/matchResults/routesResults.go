@@ -14,7 +14,10 @@ func InitRoutes(e *echo.Echo) error {
 	// CRUD
 	e.GET("/results/:matchID", GetMatchResult, auth.RequireUserOrGuestAuth)
 	e.GET("/game/:gameID/results", GetMatchResultsOfGame, auth.RequireUserOrGuestAuth)
-	e.GET("/user/results", GetMatchResultsOfUser, auth.RequireUserOrGuestAuth)
+	e.GET("/user/results", GetMatchResultsOfCurrentUser, auth.RequireUserOrGuestAuth)
+
+	// Admin only
 	e.GET("/results", GetMatchResults, auth.RequireAdmin)
+	e.GET("/user/:userID/results", GetMatchResultsOfUser, auth.RequireAdmin)
 	return nil
 }

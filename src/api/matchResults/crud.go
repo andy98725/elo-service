@@ -55,7 +55,7 @@ func GetMatchResultsOfGame(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, echo.Map{"matchResults": matchResultsResp, "nextPage": nextPage})
 }
 
-func GetMatchResultsOfUser(ctx echo.Context) error {
+func GetMatchResultsOfCurrentUser(ctx echo.Context) error {
 	id := ctx.Get("id").(string)
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
@@ -83,6 +83,26 @@ func GetMatchResults(ctx echo.Context) error {
 	}
 
 	matchResults, nextPage, err := models.GetMatchResults(page, pageSize)
+	if err != nil {
+		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+	}
+
+	matchResultsResp := make([]models.MatchResultResp, len(matchResults))
+	for i, matchResult := range matchResults {
+		matchResultsResp[i] = *matchResult.ToResp()
+	}
+
+	return ctx.JSON(http.StatusOK, echo.Map{"matchResults": matchResultsResp, "nextPage": nextPage})
+}
+
+func GetMatchResultsOfUser(ctx echo.Context) error {
+	id := ctx.Param("userID")
+	page, pageSize, err := util.ParsePagination(ctx)
+	if err != nil {
+		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
+	}
+
+	matchResults, nextPage, err := models.GetMatchResultsOfPlayer(id, page, pageSize)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}

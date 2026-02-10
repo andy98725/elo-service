@@ -11,5 +11,7 @@
 
 ## Hetzner machines
 
-[ ] Add warm pool
+Make machines start up faster:
+[ ] Rework machines to take token + player IDs after startup (stdin, docker attach)
 [ ] Pre-bake snapshots for startup time (use route to trigger)
+[ ] Add warm pool
