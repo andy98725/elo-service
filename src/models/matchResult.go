@@ -147,15 +147,11 @@ func CanUserSeeMatchResult(userID string, matchResultID string) (bool, error) {
 		return true, nil
 	}
 
-	user, err := GetById(userID)
-	if err != nil {
-		return false, err
-	}
-
 	// Admin can see all match results
-	if user.IsAdmin {
+	if user, err := GetById(userID); err != nil && user.IsAdmin {
 		return true, nil
 	}
+
 	// If user is owner of game, they can see all match results
 	if matchResult.Game.OwnerID == userID {
 		return true, nil
