@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -98,7 +97,6 @@ func (h *HetznerConnection) CreateServer(ctx context.Context, config *MachineCon
 			return nil, fmt.Errorf("failed to get server: %w", err)
 		}
 		if srv.PublicNet.IPv4.IP != nil {
-			// machineID = strconv.Itoa(srv.ID)
 			publicIP = srv.PublicNet.IPv4.IP.String()
 			break
 		}
@@ -146,30 +144,30 @@ func (h *HetznerConnection) CreateServer(ctx context.Context, config *MachineCon
 // 	return snapshot.Image.ID, nil
 // }
 
-func waitForServerHealth(ctx context.Context, serverConn *MachineConnectionInfo, interval, timeout time.Duration) error {
-	healthURL := fmt.Sprintf("http://%s:%d/health", serverConn.PublicIP, serverConn.LogsPort)
-	deadline := time.Now().Add(timeout)
+// func waitForServerHealth(ctx context.Context, serverConn *MachineConnectionInfo, interval, timeout time.Duration) error {
+// 	healthURL := fmt.Sprintf("http://%s:%d/health", serverConn.PublicIP, serverConn.LogsPort)
+// 	deadline := time.Now().Add(timeout)
 
-	for time.Now().Before(deadline) {
-		resp, err := http.DefaultClient.Get(healthURL)
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return nil
-			}
-		}
-		time.Sleep(interval)
-	}
+// 	for time.Now().Before(deadline) {
+// 		resp, err := http.DefaultClient.Get(healthURL)
+// 		if err == nil {
+// 			resp.Body.Close()
+// 			if resp.StatusCode == http.StatusOK {
+// 				return nil
+// 			}
+// 		}
+// 		time.Sleep(interval)
+// 	}
 
-	return fmt.Errorf("health check did not return 200 within %v: GET %s", timeout, healthURL)
-}
-func (h *HetznerConnection) DeleteServer(ctx context.Context, machineID int64) error {
-	res, _, err := h.client.Server.DeleteWithResult(ctx, &hcloud.Server{ID: machineID})
+//		return fmt.Errorf("health check did not return 200 within %v: GET %s", timeout, healthURL)
+//	}
+func (h *HetznerConnection) DeleteServer(ctx context.Context, machineID int64, machineName string) error {
+	res, _, err := h.client.Server.DeleteWithResult(ctx, &hcloud.Server{ID: machineID, Name: machineName})
 	if err != nil {
 		return fmt.Errorf("failed to delete server: %w", err)
 	}
 	if res.Action.Status != "success" {
-		return fmt.Errorf("failed to delete server: %s", res.Action.Status)
+		return fmt.Errorf("failed to delete server: %s", res.Action.Status, "action", res.Action)
 	}
 	return nil
 }
