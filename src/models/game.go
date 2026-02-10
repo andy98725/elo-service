@@ -29,12 +29,12 @@ type Game struct {
 	CreatedAt   time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 
 	// TODO separate into leaderboard if needed
-	GuestsAllowed           bool          `json:"guests_allowed" gorm:"default:true"`
-	PublicResults           bool          `json:"public_results" gorm:"default:false"`
-	LobbySize               int           `json:"lobby_size" gorm:"default:2"`
-	MatchmakingStrategy     string        `json:"matchmaking_strategy" gorm:"not null;default:'random'"`
-	MatchmakingMachineName  string        `json:"matchmaking_machine_name" gorm:"not null"`
-	MatchmakingSnapshotName string        `json:"matchmaking_snapshot_name" gorm:"not null"`
+	GuestsAllowed          bool   `json:"guests_allowed" gorm:"default:true"`
+	PublicResults          bool   `json:"public_results" gorm:"default:false"`
+	LobbySize              int    `json:"lobby_size" gorm:"default:2"`
+	MatchmakingStrategy    string `json:"matchmaking_strategy" gorm:"not null;default:'random'"`
+	MatchmakingMachineName string `json:"matchmaking_machine_name" gorm:"not null"`
+	// MatchmakingSnapshotName string        `json:"matchmaking_snapshot_name" gorm:""`
 	MatchmakingMachinePorts pq.Int64Array `json:"matchmaking_machine_ports" gorm:"type:integer[];default:'{}'"`
 	ELOStrategy             string        `json:"elo_strategy" gorm:"not null;default:'unranked'"`
 	DefaultRating           int           `json:"default_rating" gorm:"default:1000"`
@@ -205,14 +205,15 @@ func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
 
 	return game, nil
 }
-func SetGameSnapshot(id string, snapshotName string) error {
-	game, err := GetGame(id)
-	if err != nil {
-		return err
-	}
-	game.MatchmakingSnapshotName = snapshotName
-	return server.S.DB.Save(game).Error
-}
+
+// func SetGameSnapshot(id string, snapshotName string) error {
+// 	game, err := GetGame(id)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	game.MatchmakingSnapshotName = snapshotName
+// 	return server.S.DB.Save(game).Error
+// }
 
 func DeleteGame(id string, owner User) error {
 	game, err := GetGame(id)
