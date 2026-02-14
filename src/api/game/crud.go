@@ -55,7 +55,7 @@ func CreateGame(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "error creating game")
 	}
 
-	return ctx.JSON(http.StatusOK, game)
+	return ctx.JSON(http.StatusOK, game.ToResp())
 }
 
 // Admin only
@@ -69,9 +69,13 @@ func GetGames(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Error getting games: "+err.Error())
 	}
+	gamesResp := make([]models.GameResp, len(games))
+	for i, game := range games {
+		gamesResp[i] = *game.ToResp()
+	}
 
 	return ctx.JSON(http.StatusOK, echo.Map{
-		"games":    games,
+		"games":    gamesResp,
 		"nextPage": nextPage,
 	})
 }

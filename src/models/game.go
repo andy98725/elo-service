@@ -42,22 +42,22 @@ type Game struct {
 }
 
 type GameResp struct {
-	ID                      string  `json:"id"`
-	OwnerID                 string  `json:"owner_id"`
-	Name                    string  `json:"name"`
-	Description             string  `json:"description"`
-	GuestsAllowed           bool    `json:"guests_allowed"`
-	LobbySize               int     `json:"lobby_size"`
-	MatchmakingStrategy     string  `json:"matchmaking_strategy"`
-	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
-	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
-	ELOStrategy             string  `json:"elo_strategy"`
+	ID                      string   `json:"id"`
+	Owner                   UserResp `json:"owner"`
+	Name                    string   `json:"name"`
+	Description             string   `json:"description"`
+	GuestsAllowed           bool     `json:"guests_allowed"`
+	LobbySize               int      `json:"lobby_size"`
+	MatchmakingStrategy     string   `json:"matchmaking_strategy"`
+	MatchmakingMachineName  string   `json:"matchmaking_machine_name"`
+	MatchmakingMachinePorts []int64  `json:"matchmaking_machine_ports"`
+	ELOStrategy             string   `json:"elo_strategy"`
 }
 
 func (u *Game) ToResp() *GameResp {
 	return &GameResp{
 		ID:                      u.ID,
-		OwnerID:                 u.OwnerID,
+		Owner:                   *u.Owner.ToResp(),
 		Name:                    u.Name,
 		Description:             u.Description,
 		GuestsAllowed:           u.GuestsAllowed,

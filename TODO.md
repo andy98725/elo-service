@@ -1,10 +1,8 @@
 # TODO
 
 
+[ ] Add battle bots once game server builds again
 ## elo-service
-
-[ ] Finish e2e test
-[ ] Test the e2e test
 
 [ ] Clean up docker-compose
 
