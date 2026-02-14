@@ -52,7 +52,7 @@ func (m *Match) ToResp() *MatchResp {
 }
 
 func (m *Match) ConnectionAddress() string {
-	return fmt.Sprintf(`"%s"`, m.MachineIP)
+	return fmt.Sprintf("%s", m.MachineIP)
 }
 
 func MatchStarted(gameID string, connInfo *hetzner.MachineConnectionInfo, playerIDs []string) (*Match, error) {

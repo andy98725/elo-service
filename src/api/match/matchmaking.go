@@ -1,12 +1,14 @@
 package match
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
+	"github.com/andy98725/elo-service/src/util"
 	"github.com/andy98725/elo-service/src/worker/matchmaking"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo"
@@ -44,37 +46,12 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 	}
 
 	// Start TTL refresh goroutine
-	ttlRefresh := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(matchmaking.QUEUE_REFRESH_INTERVAL)
-		defer ticker.Stop()
+	ttlChan := ttlRefresh(ctx.Request().Context(), gameID, id)
 
-		searchingTicker := time.NewTicker(5 * time.Second)
-		defer searchingTicker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				// Refresh TTL to keep player in queue
-				if err := server.S.Redis.RefreshPlayerQueueTTL(ctx.Request().Context(), gameID, id, matchmaking.QUEUE_TTL); err != nil {
-					slog.Warn("Failed to refresh player queue TTL", "error", err, "playerID", id, "gameID", gameID)
-				}
-			case <-searchingTicker.C:
-				// Send searching status and check if connection is still alive
-				if err := conn.WriteJSON(echo.Map{"status": "searching"}); err != nil {
-					close(ttlRefresh)
-					server.S.Redis.RemovePlayerFromQueue(ctx.Request().Context(), gameID, id)
-					return
-				}
-			case <-ctx.Request().Context().Done():
-				return
-			case <-ttlRefresh:
-				return
-			case <-server.S.Shutdown:
-				return
-			}
-		}
-	}()
+	// Send searching status every 5 seconds
+	status := "searching"
+	statusChan := statusRefresh(ctx.Request().Context(), conn, &status)
+	defer close(*statusChan)
 
 	// Queue is joined, now we need to wait for the match to start
 	conn.WriteJSON(echo.Map{"status": "queue_joined", "players_in_queue": size})
@@ -82,7 +59,7 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 	for {
 		select {
 		case resp := <-readyChan:
-			close(ttlRefresh)
+			close(*ttlChan)
 
 			if resp.Error != nil {
 				conn.WriteJSON(echo.Map{"status": "error", "error": resp.Error.Error()})
@@ -95,16 +72,77 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 				return nil
 			}
 
+			status = "server_starting"
+			conn.WriteJSON(echo.Map{"status": status, "message": "Match found, waiting for server to start..."})
+			ready, err := util.WaitUntilServerReady(ctx.Request().Context(), match.MachineIP, match.MachineLogsPort, server.S.Shutdown)
+			if err != nil {
+				slog.Warn("Failed to wait until server is ready", "error", err, "matchID", resp.MatchID)
+				conn.WriteJSON(echo.Map{"status": "error", "error": err.Error()})
+				return nil
+			}
+			if !ready {
+				conn.WriteJSON(echo.Map{"status": "error", "error": "server not ready"})
+				return nil
+			}
 			conn.WriteJSON(echo.Map{"status": "match_found", "server_address": match.ConnectionAddress()})
 			return nil
 		case <-ctx.Request().Context().Done():
-			close(ttlRefresh)
+			close(*ttlChan)
 			return nil
 		case <-server.S.Shutdown:
-			close(ttlRefresh)
+			close(*ttlChan)
 			return nil
 		}
 	}
+}
+
+func ttlRefresh(ctx context.Context, gameID string, id string) *chan struct{} {
+	ttlRefresh := make(chan struct{})
+	go func() {
+		matchmakingTTLTicker := time.NewTicker(matchmaking.QUEUE_REFRESH_INTERVAL)
+		defer matchmakingTTLTicker.Stop()
+
+		for {
+			select {
+			case <-matchmakingTTLTicker.C:
+				// Refresh TTL to keep player in queue
+				if err := server.S.Redis.RefreshPlayerQueueTTL(ctx, gameID, id, matchmaking.QUEUE_TTL); err != nil {
+					slog.Warn("Failed to refresh player queue TTL", "error", err, "playerID", id, "gameID", gameID)
+				}
+			case <-ttlRefresh:
+				return
+			case <-ctx.Done():
+				return
+			case <-server.S.Shutdown:
+				return
+			}
+		}
+	}()
+	return &ttlRefresh
+}
+
+func statusRefresh(ctx context.Context, conn *websocket.Conn, status *string) *chan struct{} {
+	statusRefresh := make(chan struct{})
+	go func() {
+		statusTicker := time.NewTicker(5 * time.Second)
+		defer statusTicker.Stop()
+
+		for {
+			select {
+			case <-statusTicker.C:
+				if err := conn.WriteJSON(echo.Map{"status": *status}); err != nil {
+					return
+				}
+			case <-statusRefresh:
+				return
+			case <-ctx.Done():
+				return
+			case <-server.S.Shutdown:
+				return
+			}
+		}
+	}()
+	return &statusRefresh
 }
 
 func QueueSize(ctx echo.Context) error {

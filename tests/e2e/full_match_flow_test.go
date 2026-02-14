@@ -35,6 +35,7 @@ func TestMatchReportsResult(t *testing.T) {
 	}
 
 	// Connect both players to queue
+	connectionStart := time.Now()
 	t.Logf("Connecting guests to queue...")
 	wsConn1 := WebsocketConnect(t, fmt.Sprintf("%s/match/join?gameID=%s", *baseURL, exampleGameID), guest1Token)
 	wsConn2 := WebsocketConnect(t, fmt.Sprintf("%s/match/join?gameID=%s", *baseURL, exampleGameID), guest2Token)
@@ -48,6 +49,7 @@ func TestMatchReportsResult(t *testing.T) {
 	waitForMatchFound := func(t *testing.T, wsConn interface {
 		ReadMessage() (messageType int, p []byte, err error)
 	}, name string, out chan<- string) {
+		serverStarting := false
 		for {
 			_, msg, err := wsConn.ReadMessage()
 			if err != nil {
@@ -60,9 +62,18 @@ func TestMatchReportsResult(t *testing.T) {
 			status, _ := resp["status"].(string)
 			switch status {
 			case "match_found":
+				t.Logf("%s: Server is ready at %s", name, time.Since(connectionStart))
 				serverAddr, _ := resp["server_address"].(string)
 				out <- serverAddr
 				return
+			case "server_starting":
+				t.Logf("%s: received message: %+v", name, resp)
+				if serverStarting {
+					continue
+				}
+				serverStarting = true
+				t.Logf("%s: Found match at %s", name, time.Since(connectionStart))
+				continue
 			case "error":
 				t.Fatalf("%s: received error: %+v", name, resp["error"])
 			default:
@@ -84,11 +95,11 @@ func TestMatchReportsResult(t *testing.T) {
 	}
 	t.Logf("Match found. Server address: %s", serverAddr1)
 
-	// Health check takes a while currently
-	startHealthCheck := time.Now()
-	t.Logf("Waiting for server health check...")
-	WaitForHealth(t, "http://"+strings.Trim(serverAddr1, `"`)+":9999/health", 10*time.Second, 2*time.Minute)
-	t.Logf("Health check passed in %s. Joining players to server...", time.Since(startHealthCheck))
+	// // Health check takes a while currently
+	// startHealthCheck := time.Now()
+	// t.Logf("Waiting for server health check...")
+	// WaitForHealth(t, "http://"+strings.Trim(serverAddr1, `"`)+":9999/health", 10*time.Second, 2*time.Minute)
+	// t.Logf("Health check passed in %s. Joining players to server...", time.Since(startHealthCheck))
 
 	DoReq(t, "POST", fmt.Sprintf("http://%s:8080/join", serverAddr1), guest1ID, "", http.StatusOK)
 	DoReq(t, "POST", fmt.Sprintf("http://%s:8080/join", serverAddr1), guest2ID, "", http.StatusOK)
