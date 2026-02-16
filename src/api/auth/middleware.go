@@ -13,6 +13,9 @@ func RequireUserOrGuestAuth(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		tokenString := c.Request().Header.Get("Authorization")
 		if tokenString == "" {
+			tokenString = c.QueryParam("token")
+		}
+		if tokenString == "" {
 			return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 		}
 
@@ -72,6 +75,9 @@ func RequireUserAuth(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		tokenString := c.Request().Header.Get("Authorization")
 		if tokenString == "" {
+			tokenString = c.QueryParam("token")
+		}
+		if tokenString == "" {
 			return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 		}
 
@@ -111,6 +117,9 @@ func RequireUserAuth(next echo.HandlerFunc) echo.HandlerFunc {
 func RequireGuestAuth(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		tokenString := c.Request().Header.Get("Authorization")
+		if tokenString == "" {
+			tokenString = c.QueryParam("token")
+		}
 		if tokenString == "" {
 			return echo.NewHTTPError(http.StatusUnauthorized, "Unauthorized")
 		}
