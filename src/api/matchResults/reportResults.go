@@ -47,42 +47,49 @@ func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reas
 		return "", errors.New("match is not underway")
 	}
 
-	si, err := models.GetServerInstance(match.ServerInstanceID)
-	if err != nil {
-		slog.Error("Failed to load server instance for match", "error", err, "matchID", match.ID)
-		return "", err
-	}
-
 	status := ""
 
-	logsKey, err := saveMatchLogs(ctx, si)
-	if err != nil {
-		slog.Warn("Failed to save match logs", "error", err, "matchID", match.ID)
-		logsKey = ""
-		status = "Failed to save match logs"
-	}
+	if match.ServerInstanceID != "" {
+		si, err := models.GetServerInstance(match.ServerInstanceID)
+		if err != nil {
+			slog.Error("Failed to load server instance for match", "error", err, "matchID", match.ID)
+			return "", err
+		}
 
-	if _, err := models.MatchEnded(match.ID, winnerIDs, reason, logsKey); err != nil {
-		slog.Error("Failed to record match result", "error", err, "matchID", match.ID)
-		return "", err
-	}
+		logsKey, err := saveMatchLogs(ctx, si)
+		if err != nil {
+			slog.Warn("Failed to save match logs", "error", err, "matchID", match.ID)
+			logsKey = ""
+			status = "Failed to save match logs"
+		}
 
-	if err := hetzner.StopContainer(ctx,
-		si.MachineHost.PublicIP, si.MachineHost.AgentPort, si.MachineHost.AgentToken,
-		si.ContainerID); err != nil {
-		slog.Error("Failed to stop game container; it may still be running", "error", err,
-			"containerID", si.ContainerID, "hostID", si.MachineHostID)
-	}
+		if _, err := models.MatchEnded(match.ID, winnerIDs, reason, logsKey); err != nil {
+			slog.Error("Failed to record match result", "error", err, "matchID", match.ID)
+			return "", err
+		}
 
-	if err := models.FreePorts(si.MachineHostID, []int64(si.HostPorts)); err != nil {
-		slog.Error("Failed to free ports", "error", err, "hostID", si.MachineHostID)
-	}
+		if err := hetzner.StopContainer(ctx,
+			si.MachineHost.PublicIP, si.MachineHost.AgentPort, si.MachineHost.AgentToken,
+			si.ContainerID); err != nil {
+			slog.Error("Failed to stop game container; it may still be running", "error", err,
+				"containerID", si.ContainerID, "hostID", si.MachineHostID)
+		}
 
-	if err := models.SetServerInstanceStatus(si.ID, models.ServerInstanceStatusDeleted); err != nil {
-		slog.Error("Failed to mark server instance deleted", "error", err, "instanceID", si.ID)
-	}
+		if err := models.FreePorts(si.MachineHostID, []int64(si.HostPorts)); err != nil {
+			slog.Error("Failed to free ports", "error", err, "hostID", si.MachineHostID)
+		}
 
-	go tryDeleteIdleHost(si.MachineHostID, si.MachineHost.ProviderID)
+		if err := models.SetServerInstanceStatus(si.ID, models.ServerInstanceStatusDeleted); err != nil {
+			slog.Error("Failed to mark server instance deleted", "error", err, "instanceID", si.ID)
+		}
+
+		go tryDeleteIdleHost(si.MachineHostID, si.MachineHost.ProviderID)
+	} else {
+		if _, err := models.MatchEnded(match.ID, winnerIDs, reason, ""); err != nil {
+			slog.Error("Failed to record match result", "error", err, "matchID", match.ID)
+			return "", err
+		}
+	}
 
 	if status == "" {
 		status = "Thank you!"
