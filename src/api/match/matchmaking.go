@@ -94,7 +94,6 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 				"status":       "match_found",
 				"server_host":  match.ServerInstance.MachineHost.PublicIP,
 				"server_ports": []int64(match.ServerInstance.HostPorts),
-				"auth_code":    match.AuthCode,
 				"match_id":     match.ID,
 			})
 			return nil
