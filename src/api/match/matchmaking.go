@@ -90,7 +90,12 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 				conn.WriteJSON(echo.Map{"status": "error", "error": "server not ready"})
 				return nil
 			}
-			conn.WriteJSON(echo.Map{"status": "match_found", "server_address": match.ConnectionAddress()})
+			conn.WriteJSON(echo.Map{
+				"status":         "match_found",
+				"server_address": match.ConnectionAddress(),
+				"auth_code":      match.AuthCode,
+				"match_id":       match.ID,
+			})
 			return nil
 		case <-ctx.Request().Context().Done():
 			close(*ttlChan)
