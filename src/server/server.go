@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"os"
 
@@ -65,6 +66,9 @@ func InitServer(e *echo.Echo) (Server, error) {
 		return *S, err
 	}
 	S.Machines = hetzner
+	if err := S.Machines.ValidateServerType(context.Background(), S.Config.HCLOUDHostType); err != nil {
+		return *S, err
+	}
 	slog.Info("Hetzner connected")
 
 	return *S, nil

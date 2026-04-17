@@ -24,6 +24,21 @@ func InitHetznerConnection(token string) (*HetznerConnection, error) {
 	return &HetznerConnection{client: client}, nil
 }
 
+// ValidateServerType checks that the given server type name is available and not deprecated.
+// Should be called at startup to catch misconfigured HCLOUD_HOST_TYPE early.
+func (h *HetznerConnection) ValidateServerType(ctx context.Context, serverType string) error {
+	types, err := h.client.ServerType.All(ctx)
+	if err != nil {
+		return fmt.Errorf("could not fetch Hetzner server types: %w", err)
+	}
+	for _, t := range types {
+		if t.Name == serverType {
+			return nil
+		}
+	}
+	return fmt.Errorf("HCLOUD_HOST_TYPE %q is not available or has been deprecated; available types: run list_server_types to see current options", serverType)
+}
+
 type HostConnectionInfo struct {
 	ProviderID string
 	PublicIP   string

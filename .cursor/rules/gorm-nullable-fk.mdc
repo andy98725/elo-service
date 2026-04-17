@@ -1,0 +1,44 @@
+---
+description: GORM nullable foreign key fields must use pointer types
+globs: src/models/**/*.go
+alwaysApply: false
+---
+
+# GORM Nullable Foreign Keys
+
+Optional foreign key fields **must** use a pointer type (`*string`, `*uuid.UUID`, etc.), never a plain `string`.
+
+A plain `string` field in Go defaults to `""`. GORM writes this as an empty string, not `NULL`. Any subsequent lookup using that empty value (e.g. `GetServerInstance("")`) will fail with:
+
+```
+ERROR: invalid input syntax for type uuid: "" (SQLSTATE 22P02)
+```
+
+## Pattern
+
+```go
+// ❌ BAD — defaults to "" in Go, stored as empty string, not NULL
+ServerInstanceID string `gorm:"index"`
+
+// ✅ GOOD — defaults to nil in Go, stored as NULL
+ServerInstanceID *string `gorm:"index"`
+```
+
+## Migrations
+
+When adding a nullable FK column via migration, also clean up any existing empty strings from prior data:
+
+```sql
+UPDATE matches SET server_instance_id = NULL WHERE server_instance_id = '';
+```
+
+## Checking in code
+
+When reading a nullable FK, guard before dereferencing:
+
+```go
+if match.ServerInstanceID != nil && *match.ServerInstanceID != "" {
+    si, err := models.GetServerInstance(*match.ServerInstanceID)
+    // ...
+}
+```
