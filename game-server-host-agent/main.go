@@ -63,7 +63,9 @@ func main() {
 
 func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" {
+		// /health and container health checks are unauthenticated so the
+		// elo-service can poll them without storing the agent token client-side.
+		if r.URL.Path == "/health" || strings.HasSuffix(r.URL.Path, "/health") {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -50,7 +50,10 @@ async def join_queue(label: str, token: str, results: dict):
     headers = {"Authorization": f"Bearer {token}"}
     print(f"[{label}] Connecting to {url}")
     try:
-        async with websockets.connect(url, additional_headers=headers, open_timeout=30) as ws:
+        async with websockets.connect(
+            url, additional_headers=headers, open_timeout=30,
+            ping_interval=None, close_timeout=10,  # server sends "searching" keepalives; no client pings needed
+        ) as ws:
             print(f"[{label}] Connected, waiting for match...")
             async for raw in ws:
                 try:
