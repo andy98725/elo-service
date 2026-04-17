@@ -97,12 +97,32 @@ func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reas
 	return status, nil
 }
 
-// tryDeleteIdleHost deletes the host VM if it has no remaining active instances.
+// tryDeleteIdleHost deletes the host VM if it has no remaining active instances
+// and removing it would not drop available slots below the warm pool target.
 // Runs in a goroutine so it never blocks the match-end response.
 func tryDeleteIdleHost(hostID, providerID string) {
 	count, err := models.CountActiveInstancesOnHost(hostID)
 	if err != nil || count > 0 {
 		return
+	}
+
+	if warmSlots := server.S.Config.HCLOUDWarmSlots; warmSlots > 0 {
+		available, err := models.CountAvailableSlots()
+		if err != nil {
+			slog.Error("Failed to count available slots; skipping host deletion", "error", err, "hostID", hostID)
+			return
+		}
+		host, err := models.GetMachineHost(hostID)
+		if err != nil {
+			slog.Error("Failed to load host; skipping host deletion", "error", err, "hostID", hostID)
+			return
+		}
+		// available already includes this host's slots; check if we can afford to lose them
+		if available-int64(host.MaxSlots) < int64(warmSlots) {
+			slog.Info("Keeping idle host to maintain warm pool", "hostID", hostID,
+				"available", available, "warmSlots", warmSlots)
+			return
+		}
 	}
 
 	if err := models.SetMachineHostDeleted(hostID); err != nil {

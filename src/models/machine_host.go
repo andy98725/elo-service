@@ -66,6 +66,27 @@ func CountMachineHosts() (int64, error) {
 	return count, err
 }
 
+// CountAvailableSlots returns the total number of unused container slots
+// across all ready hosts (maxSlots minus active instances per host).
+func CountAvailableSlots() (int64, error) {
+	var hosts []MachineHost
+	if err := server.S.DB.Where("status = ?", MachineHostStatusReady).Find(&hosts).Error; err != nil {
+		return 0, err
+	}
+
+	var total int64
+	for _, host := range hosts {
+		active, err := CountActiveInstancesOnHost(host.ID)
+		if err != nil {
+			return 0, err
+		}
+		if free := int64(host.MaxSlots) - active; free > 0 {
+			total += free
+		}
+	}
+	return total, nil
+}
+
 // FindAvailableHost returns a ready host that has slot capacity and enough free ports in the
 // configured range to accommodate neededPorts more port allocations. Returns nil (no error)
 // if no host is currently available.

@@ -23,6 +23,7 @@ type Config struct {
 	HCLOUDHostType                string
 	HCLOUDMaxHosts                int
 	HCLOUDMaxSlotsPerHost         int
+	HCLOUDWarmSlots               int
 	HCLOUDAgentPort               int64
 	HCLOUDPortRangeStart          int64
 	HCLOUDPortRangeEnd            int64
@@ -99,6 +100,13 @@ func InitConfig() (*Config, error) {
 	if v := os.Getenv("HCLOUD_MAX_SLOTS_PER_HOST"); v != "" {
 		if n, err := fmt.Sscanf(v, "%d", &cfg.HCLOUDMaxSlotsPerHost); n != 1 || err != nil {
 			return nil, fmt.Errorf("HCLOUD_MAX_SLOTS_PER_HOST must be an integer")
+		}
+	}
+
+	cfg.HCLOUDWarmSlots = 0
+	if v := os.Getenv("HCLOUD_WARM_SLOTS"); v != "" {
+		if n, err := fmt.Sscanf(v, "%d", &cfg.HCLOUDWarmSlots); n != 1 || err != nil {
+			return nil, fmt.Errorf("HCLOUD_WARM_SLOTS must be an integer")
 		}
 	}
 
