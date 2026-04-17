@@ -85,7 +85,7 @@ func InitConfig() (*Config, error) {
 	}
 
 	if cfg.HCLOUDHostType = os.Getenv("HCLOUD_HOST_TYPE"); cfg.HCLOUDHostType == "" {
-		cfg.HCLOUDHostType = "cx32"
+		cfg.HCLOUDHostType = "cx33"
 	}
 
 	cfg.HCLOUDMaxHosts = 5
