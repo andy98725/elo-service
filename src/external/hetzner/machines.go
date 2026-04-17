@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"regexp"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,231 +17,158 @@ import (
 
 type HetznerConnection struct {
 	client *hcloud.Client
-	// sshKey *hcloud.SSHKey
 }
 
 func InitHetznerConnection(token string) (*HetznerConnection, error) {
 	client := hcloud.NewClient(hcloud.WithToken(token))
-
-	// // Find SSH key
-	// sshKeyName := os.Getenv("HCLOUD_SSH_KEY_NAME")
-	// if sshKeyName == "" {
-	// 	return nil, fmt.Errorf("HCLOUD_SSH_KEY_NAME is not set")
-	// }
-
-	// sshKey, _, err := client.SSHKey.GetByName(context.Background(), sshKeyName)
-	// if err != nil || sshKey == nil {
-	// 	return nil, fmt.Errorf("SSH key %s not found: %v", sshKeyName, err)
-	// }
-
-	return &HetznerConnection{
-		client: client,
-		// sshKey: sshKey,
-	}, nil
+	return &HetznerConnection{client: client}, nil
 }
 
-type MachineConfig struct {
-	GameName                string
-	MatchmakingMachineName  string
-	MatchmakingMachinePorts []int64
-	PlayerIDs               []string
+type HostConnectionInfo struct {
+	ProviderID string
+	PublicIP   string
+	AgentPort  int64
+	AgentToken string
 }
 
-type MachineConnectionInfo struct {
-	MachineName string
-	MachineID   int64
-	AuthCode    string
-	PublicIP    string
-	LogsPort    int64
-}
-
-var sanitizeRegex = regexp.MustCompile(`[^a-zA-Z0-9]`)
-
-// Blocks until machine is created
-// TODO: Prebake snapshots for each game server image
-// https://chatgpt.com/share/686f845f-14a4-800a-8c0e-c775a140e265
-func (h *HetznerConnection) CreateServer(ctx context.Context, config *MachineConfig) (*MachineConnectionInfo, error) {
-	token, err := generateToken()
+// CreateHost provisions a new Hetzner VM that runs the game-server-host-agent.
+// Blocks until the agent is reachable (VM fully booted and agent running).
+func (h *HetznerConnection) CreateHost(ctx context.Context, serverType string, agentPort int64) (*HostConnectionInfo, error) {
+	agentToken, err := GenerateToken()
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate secure token: %w", err)
+		return nil, fmt.Errorf("failed to generate agent token: %w", err)
 	}
-	userData, logsPort := hetznerUserData(config.MatchmakingMachineName, config.MatchmakingMachinePorts, token, config.PlayerIDs)
 
-	sanitizedGameName := sanitizeRegex.ReplaceAllString(config.GameName, "")
+	userData := hostCloudConfig(agentPort, agentToken)
+	serverName := fmt.Sprintf("game-host-%d", time.Now().Unix())
 
-	// Create server
-	serverName := fmt.Sprintf("game-server-%s-%d", sanitizedGameName, time.Now().Unix())
-	slog.Info("Creating server", "serverName", serverName)
+	slog.Info("Creating host VM", "serverName", serverName, "serverType", serverType)
 	createOpts := hcloud.ServerCreateOpts{
-		Name:       serverName,
-		ServerType: &hcloud.ServerType{Name: "cx23", Architecture: hcloud.ArchitectureX86, CPUType: hcloud.CPUTypeShared},
-		Labels:     map[string]string{"game": sanitizedGameName},
-		Image:      &hcloud.Image{Name: "ubuntu-24.04"},
-		// SSHKeys:    []*hcloud.SSHKey{h.sshKey},
+		Name:      serverName,
+		ServerType: &hcloud.ServerType{Name: serverType, Architecture: hcloud.ArchitectureX86, CPUType: hcloud.CPUTypeShared},
+		Image:     &hcloud.Image{Name: "ubuntu-24.04"},
 		Location:  &hcloud.Location{Name: "nbg1"},
 		UserData:  userData,
-		PublicNet: &hcloud.ServerCreatePublicNet{EnableIPv4: true, EnableIPv6: true},
+		PublicNet: &hcloud.ServerCreatePublicNet{EnableIPv4: true, EnableIPv6: false},
+		Labels:    map[string]string{"role": "game-host"},
 	}
 
-	server, _, err := h.client.Server.Create(ctx, createOpts)
+	result, _, err := h.client.Server.Create(ctx, createOpts)
 	if err != nil {
-		slog.Error("failed to create server", "error", err)
-		return nil, fmt.Errorf("failed to create server: %w", err)
+		return nil, fmt.Errorf("failed to create host VM: %w", err)
 	}
 
-	slog.Info("Server is creating... waiting for IP assignment")
+	slog.Info("Host VM creating, waiting for IP", "serverName", serverName)
 	var publicIP string
 	for {
-		srv, _, err := h.client.Server.GetByID(ctx, server.Server.ID)
+		srv, _, err := h.client.Server.GetByID(ctx, result.Server.ID)
 		if err != nil {
-			slog.Error("failed to get server", "error", err)
-			return nil, fmt.Errorf("failed to get server: %w", err)
+			return nil, fmt.Errorf("failed to poll host VM: %w", err)
 		}
 		if srv.PublicNet.IPv4.IP != nil {
 			publicIP = srv.PublicNet.IPv4.IP.String()
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	return &MachineConnectionInfo{
-		MachineName: serverName,
-		MachineID:   server.Server.ID,
-		AuthCode:    token,
-		PublicIP:    publicIP,
-		LogsPort:    logsPort,
+	slog.Info("Host VM has IP, waiting for agent", "ip", publicIP, "agentPort", agentPort)
+	if err := waitForAgent(ctx, publicIP, agentPort); err != nil {
+		return nil, fmt.Errorf("agent did not become ready: %w", err)
+	}
+
+	slog.Info("Host VM ready", "serverName", serverName, "ip", publicIP)
+	return &HostConnectionInfo{
+		ProviderID: strconv.FormatInt(result.Server.ID, 10),
+		PublicIP:   publicIP,
+		AgentPort:  agentPort,
+		AgentToken: agentToken,
 	}, nil
 }
 
-// Snapshots won't work with the current implementation because the player IDs are baked into the hetzner user data.
-// To be able to do this, we'd need to pass player IDs at runtime.
-// This would be a good change because then it allows us to warm pool servers.
-
-// func (h *HetznerConnection) CreateSnapshot(ctx context.Context, config *MachineConfig) (int64, error) {
-// 	// Start server
-// 	serverConn, err := h.CreateServer(ctx, config)
-// 	if err != nil {
-// 		return 0, fmt.Errorf("failed to create server: %w", err)
-// 	}
-// 	if err := waitForServerHealth(ctx, serverConn, 100*time.Millisecond, 2*time.Minute); err != nil {
-// 		return 0, fmt.Errorf("failed to wait for server health: %w", err)
-// 	}
-
-// 	// Snapshot
-// 	sanitizedGameName := sanitizeRegex.ReplaceAllString(config.GameName, "")
-// 	snapshot, _, err := h.client.Server.CreateImage(ctx, &hcloud.Server{ID: serverConn.MachineID}, &hcloud.ServerCreateImageOpts{
-// 		Type:        hcloud.ImageTypeSnapshot,
-// 		Description: &sanitizedGameName,
-// 		Labels:      map[string]string{"game": sanitizedGameName},
-// 	})
-// 	if err != nil {
-// 		return 0, fmt.Errorf("failed to create snapshot: %w", err)
-// 	}
-// 	// Delete server
-// 	if err := h.DeleteServer(ctx, serverConn.MachineID); err != nil {
-// 		return 0, fmt.Errorf("failed to delete server: %w", err)
-// 	}
-
-// 	return snapshot.Image.ID, nil
-// }
-
-// func waitForServerHealth(ctx context.Context, serverConn *MachineConnectionInfo, interval, timeout time.Duration) error {
-// 	healthURL := fmt.Sprintf("http://%s:%d/health", serverConn.PublicIP, serverConn.LogsPort)
-// 	deadline := time.Now().Add(timeout)
-
-// 	for time.Now().Before(deadline) {
-// 		resp, err := http.DefaultClient.Get(healthURL)
-// 		if err == nil {
-// 			resp.Body.Close()
-// 			if resp.StatusCode == http.StatusOK {
-// 				return nil
-// 			}
-// 		}
-// 		time.Sleep(interval)
-// 	}
-
-//		return fmt.Errorf("health check did not return 200 within %v: GET %s", timeout, healthURL)
-//	}
-func (h *HetznerConnection) DeleteServer(ctx context.Context, machineID int64, machineName string) error {
-	shutdown, _, err := h.client.Server.Shutdown(ctx, &hcloud.Server{ID: machineID, Name: machineName})
+// DeleteHost shuts down and permanently deletes a host VM.
+func (h *HetznerConnection) DeleteHost(ctx context.Context, providerID string) error {
+	id, err := strconv.ParseInt(providerID, 10, 64)
 	if err != nil {
-		return fmt.Errorf("failed to shutdown server: %w", err)
+		return fmt.Errorf("invalid providerID %q: %w", providerID, err)
 	}
-	if shutdown.Status != "success" {
-		return fmt.Errorf("failed to shutdown server: %s", shutdown.Status)
+
+	server := &hcloud.Server{ID: id}
+
+	shutdown, _, err := h.client.Server.Shutdown(ctx, server)
+	if err != nil {
+		return fmt.Errorf("failed to shutdown host VM: %w", err)
 	}
 	h.client.Action.WaitFor(ctx, shutdown)
 
-	delete, _, err := h.client.Server.DeleteWithResult(ctx, &hcloud.Server{ID: machineID, Name: machineName})
+	del, _, err := h.client.Server.DeleteWithResult(ctx, server)
 	if err != nil {
-		return fmt.Errorf("failed to delete server: %w", err)
+		return fmt.Errorf("failed to delete host VM: %w", err)
 	}
-	if delete.Action.Status != "success" {
-		return fmt.Errorf("failed to delete server: %s", delete.Action.Status, "action", delete.Action)
+	if del.Action.Status != "success" {
+		return fmt.Errorf("delete action did not succeed: %s", del.Action.Status)
 	}
+
+	slog.Info("Host VM deleted", "providerID", providerID)
 	return nil
 }
 
-const hetznerCloudConfig = `#cloud-config
+// GenerateToken produces a random 32-byte hex token suitable for agent and game-server auth.
+func GenerateToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		return "", err
+	}
+	token := hex.EncodeToString(b)
+	token = strings.ReplaceAll(token, " ", "-")
+	token = strings.ReplaceAll(token, "/", "-")
+	return token, nil
+}
+
+// waitForAgent polls GET http://{ip}:{port}/health until it receives 200 or the context is cancelled.
+func waitForAgent(ctx context.Context, ip string, port int64) error {
+	url := fmt.Sprintf("http://%s:%d/health", ip, port)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	deadline := time.Now().Add(5 * time.Minute)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if time.Now().After(deadline) {
+				return fmt.Errorf("timed out waiting for agent at %s", url)
+			}
+			resp, err := http.Get(url)
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return nil
+				}
+			}
+		}
+	}
+}
+
+// hostCloudConfig returns the cloud-init user-data string for a host VM.
+// It installs Docker and starts the game-server-host-agent container.
+const hostCloudConfigTemplate = `#cloud-config
 package_update: true
 packages:
   - docker.io
 
-write_files:
-  - path: /root/start-containers.sh
-    permissions: '0755'
-    content: |
-      #!/bin/bash
-      set -e
-      mkdir -p /shared
-
-      docker run -d --name game-server \
-        %s -v /shared:/shared \
-        %s -token %s %s
-
-      nohup docker logs -f game-server > /shared/server.log 2>&1 &
-      docker run -d --name log-sidecar \
-        -p ${LOGS_PORT}:8080 \
-        -v /shared:/shared:ro \
-        docker.io/andy98725/game-server-sidecar:latest
-
 runcmd:
   - systemctl start docker
-  - export LOGS_PORT=%d
-  - /root/start-containers.sh
-
+  - docker pull docker.io/andy98725/game-server-host-agent:latest
+  - docker run -d --name game-server-agent
+      --restart always
+      -p %d:8080
+      -v /var/run/docker.sock:/var/run/docker.sock
+      -e AGENT_TOKEN=%s
+      docker.io/andy98725/game-server-host-agent:latest
 `
 
-func hetznerUserData(image string, ports []int64, token string, playerIDs []string) (string, int64) {
-	portsStr := ""
-	for _, port := range ports {
-		portsStr += fmt.Sprintf("-p %d:%d -p %d:%d/udp ", port, port, port, port)
-	}
-
-	playerIDsStr := strings.Join(playerIDs, " ")
-	logsPort := logsPort(9999, ports)
-
-	return fmt.Sprintf(hetznerCloudConfig, portsStr, image, token, playerIDsStr, logsPort), logsPort
-}
-
-func generateToken() (string, error) {
-	tokenBytes := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, tokenBytes); err != nil {
-		return "", fmt.Errorf("failed to generate secure token: %w", err)
-	}
-	authCode := strings.ReplaceAll(hex.EncodeToString(tokenBytes), " ", "-")
-	authCode = strings.ReplaceAll(authCode, "/", "-")
-	return authCode, nil
-}
-
-func logsPort(defaultPort int64, ports []int64) int64 {
-	for isPresent := false; isPresent; defaultPort++ {
-		for _, port := range ports {
-			if port == defaultPort {
-				isPresent = true
-				break
-			}
-		}
-	}
-	return defaultPort
+func hostCloudConfig(agentPort int64, agentToken string) string {
+	return fmt.Sprintf(hostCloudConfigTemplate, agentPort, agentToken)
 }

@@ -2,26 +2,25 @@ package util
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 )
 
-func WaitUntilServerReady(ctx context.Context, ip string, port int64, shutdown <-chan struct{}) (bool, error) {
-	serverCheck := time.NewTicker(1 * time.Second)
-	defer serverCheck.Stop()
+// WaitUntilServerReady polls the given URL every second until it returns HTTP 200,
+// the context is cancelled, or the shutdown channel is closed.
+func WaitUntilServerReady(ctx context.Context, url string, shutdown <-chan struct{}) (bool, error) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case <-serverCheck.C:
-			resp, err := http.Get(fmt.Sprintf("http://%s:%d/health", ip, port))
+		case <-ticker.C:
+			resp, err := http.Get(url)
 			if err != nil {
 				continue
 			}
-			if err := resp.Body.Close(); err != nil {
-				return false, err
-			}
-			if resp.StatusCode == 200 {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
 				return true, nil
 			}
 		case <-ctx.Done():
@@ -29,6 +28,5 @@ func WaitUntilServerReady(ctx context.Context, ip string, port int64, shutdown <
 		case <-shutdown:
 			return false, nil
 		}
-
 	}
 }

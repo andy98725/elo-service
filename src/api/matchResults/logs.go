@@ -2,45 +2,26 @@ package matchResults
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"net/http"
 
+	"github.com/andy98725/elo-service/src/external/hetzner"
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
 	"github.com/labstack/echo"
 	"gorm.io/gorm"
 )
 
-// Internal helper that saves the logs of a RUNNING MATCH.
-func saveMatchLogs(matchID string) (string, error) {
-	match, err := models.GetMatch(matchID)
+// saveMatchLogs fetches container logs from the host agent and uploads them to S3.
+// Returns the S3 key, or empty string if logs could not be saved (non-fatal).
+func saveMatchLogs(ctx context.Context, si *models.ServerInstance) (string, error) {
+	logs, err := hetzner.GetContainerLogs(ctx,
+		si.MachineHost.PublicIP, si.MachineHost.AgentPort, si.MachineHost.AgentToken,
+		si.ContainerID)
 	if err != nil {
 		return "", err
 	}
 
-	if match.MachineLogsPort == 0 {
-		return "", nil
-	}
-
-	resp, err := http.Get(fmt.Sprintf("http://%s:%d/logs", match.MachineIP, match.MachineLogsPort))
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	// Ideally we'd stream, but AWS needs to know the content length ahead of time.
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	logsKey, err := server.S.AWS.UploadLogs(context.Background(), body)
-	if err != nil {
-		return "", err
-	}
-
-	return logsKey, nil
+	return server.S.AWS.UploadLogs(ctx, logs)
 }
 
 func GetMatchLogs(ctx echo.Context) error {
@@ -57,7 +38,6 @@ func GetMatchLogs(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "error getting match result: "+err.Error())
 	}
 
-	// AuthZ for logs
 	if canSee, err := models.CanUserSeeMatchResult(id, matchID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "error checking if user can see match result: "+err.Error())
 	} else if !canSee {
@@ -72,7 +52,6 @@ func GetMatchLogs(ctx echo.Context) error {
 		}
 	}
 
-	// Pull logs from S3
 	if matchResult.LogsKey == "" {
 		return echo.NewHTTPError(http.StatusNotFound, "No logs.")
 	}

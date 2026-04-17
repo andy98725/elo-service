@@ -2,6 +2,7 @@ package match
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -74,7 +75,12 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 
 			status = "server_starting"
 			conn.WriteJSON(echo.Map{"status": status, "message": "Match found, waiting for server to start..."})
-			ready, err := util.WaitUntilServerReady(ctx.Request().Context(), match.MachineIP, match.MachineLogsPort, server.S.Shutdown)
+
+			healthURL := fmt.Sprintf("http://%s:%d/containers/%s/health",
+				match.ServerInstance.MachineHost.PublicIP,
+				match.ServerInstance.MachineHost.AgentPort,
+				match.ServerInstance.ContainerID)
+			ready, err := util.WaitUntilServerReady(ctx.Request().Context(), healthURL, server.S.Shutdown)
 			if err != nil {
 				slog.Warn("Failed to wait until server is ready", "error", err, "matchID", resp.MatchID)
 				conn.WriteJSON(echo.Map{"status": "error", "error": err.Error()})

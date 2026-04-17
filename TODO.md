@@ -1,7 +1,8 @@
 # TODO
 
 
-[ ] Add battle bots once game server builds again
+
+
 ## elo-service
 
 [ ] Clean up docker-compose
