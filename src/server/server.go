@@ -17,8 +17,8 @@ type Server struct {
 	Logger   *slog.Logger
 	DB       *gorm.DB
 	Redis    *redis.Redis
-	AWS      *aws.AWSClient
-	Machines *hetzner.HetznerConnection
+	AWS      StorageService
+	Machines MachineService
 	e        *echo.Echo
 	Shutdown chan struct{}
 }
