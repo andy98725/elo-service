@@ -43,6 +43,7 @@ type Game struct {
 	DefaultRating           int           `json:"default_rating" gorm:"default:1000"`
 	PublicResults           bool          `json:"public_results" gorm:"default:true"`
 	PublicMatchLogs         bool          `json:"public_match_logs" gorm:"default:true"`
+	MetadataEnabled         bool          `json:"metadata_enabled" gorm:"default:false"`
 }
 
 type GameResp struct {
@@ -56,6 +57,7 @@ type GameResp struct {
 	MatchmakingMachineName  string   `json:"matchmaking_machine_name"`
 	MatchmakingMachinePorts []int64  `json:"matchmaking_machine_ports"`
 	ELOStrategy             string   `json:"elo_strategy"`
+	MetadataEnabled         bool     `json:"metadata_enabled"`
 }
 
 func (u *Game) ToResp() *GameResp {
@@ -70,6 +72,7 @@ func (u *Game) ToResp() *GameResp {
 		MatchmakingMachineName:  u.MatchmakingMachineName,
 		MatchmakingMachinePorts: []int64(u.MatchmakingMachinePorts),
 		ELOStrategy:             u.ELOStrategy,
+		MetadataEnabled:         u.MetadataEnabled,
 	}
 }
 
@@ -85,6 +88,7 @@ type CreateGameParams struct {
 	ELOStrategy             string
 	PublicMatchResults      bool
 	PublicMatchLogs         bool
+	MetadataEnabled         bool
 }
 
 func CreateGame(params CreateGameParams, owner User) (*Game, error) {
@@ -117,6 +121,7 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		MatchmakingMachinePorts: pq.Int64Array(params.MatchmakingMachinePorts),
 		ELOStrategy:             params.ELOStrategy,
 		PublicMatchLogs:         params.PublicMatchLogs,
+		MetadataEnabled:         params.MetadataEnabled,
 	}
 
 	result := server.S.DB.Create(game)
@@ -165,6 +170,7 @@ type UpdateGameParams struct {
 	ELOStrategy             string  `json:"elo_strategy"`
 	PublicResults           *bool   `json:"public_match_results"`
 	PublicMatchLogs         *bool   `json:"public_match_logs"`
+	MetadataEnabled         *bool   `json:"metadata_enabled"`
 }
 
 func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
@@ -212,6 +218,9 @@ func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
 	}
 	if params.PublicMatchLogs != nil {
 		game.PublicMatchLogs = *params.PublicMatchLogs
+	}
+	if params.MetadataEnabled != nil {
+		game.MetadataEnabled = *params.MetadataEnabled
 	}
 
 	result := server.S.DB.Save(game)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -11,6 +12,24 @@ import (
 
 var ErrPlayerAlreadyInQueue = errors.New("player already in queue")
 var ErrPlayerNotInQueue = errors.New("player not in queue")
+
+const MetadataSeparator = "::"
+
+func QueueKey(gameID string, metadata string) string {
+	if metadata == "" {
+		return gameID
+	}
+	return gameID + MetadataSeparator + metadata
+}
+
+func ParseQueueKey(queueKey string) (gameID string, metadata string) {
+	parts := strings.SplitN(queueKey, MetadataSeparator, 2)
+	gameID = parts[0]
+	if len(parts) > 1 {
+		metadata = parts[1]
+	}
+	return
+}
 
 type Redis struct {
 	Client *redis.Client

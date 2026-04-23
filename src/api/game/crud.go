@@ -34,6 +34,7 @@ type CreateGameRequest struct {
 	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
 	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
 	ELOStrategy             string  `json:"elo_strategy"`
+	MetadataEnabled         bool    `json:"metadata_enabled"`
 }
 
 func CreateGame(ctx echo.Context) error {
@@ -54,6 +55,7 @@ func CreateGame(ctx echo.Context) error {
 		MatchmakingMachineName:  req.MatchmakingMachineName,
 		MatchmakingMachinePorts: req.MatchmakingMachinePorts,
 		ELOStrategy:             req.ELOStrategy,
+		MetadataEnabled:         req.MetadataEnabled,
 	}, *user)
 	if err != nil {
 		if isUniqueConstraintViolation(err) {
