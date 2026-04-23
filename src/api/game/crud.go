@@ -38,6 +38,18 @@ type CreateGameRequest struct {
 	MetadataEnabled         bool    `json:"metadata_enabled"`
 }
 
+// CreateGame godoc
+// @Summary      Create a game
+// @Description  Creates a new game with matchmaking and ELO configuration
+// @Tags         Games
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        body body CreateGameRequest true "Game creation payload"
+// @Success      200 {object} models.GameResp
+// @Failure      400 {object} echo.HTTPError
+// @Failure      500 {object} echo.HTTPError
+// @Router       /game [post]
 func CreateGame(ctx echo.Context) error {
 	req := new(CreateGameRequest)
 	if err := ctx.Bind(req); err != nil {
@@ -74,7 +86,19 @@ func CreateGame(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, game.ToResp())
 }
 
-// Admin only
+// GetGames godoc
+// @Summary      List all games (admin)
+// @Description  Returns a paginated list of all games. Admin only.
+// @Tags         Games
+// @Produce      json
+// @Security     BearerAuth
+// @Param        page     query int false "Page number (default 0)"
+// @Param        pageSize query int false "Page size (default 10)"
+// @Success      200 {object} map[string]interface{} "games, nextPage"
+// @Failure      400 {object} echo.HTTPError
+// @Failure      403 {object} echo.HTTPError
+// @Failure      500 {object} echo.HTTPError
+// @Router       /games [get]
 func GetGames(ctx echo.Context) error {
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
@@ -96,6 +120,17 @@ func GetGames(ctx echo.Context) error {
 	})
 }
 
+// GetGame godoc
+// @Summary      Get a game by ID
+// @Description  Returns a single game by its UUID
+// @Tags         Games
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path string true "Game UUID"
+// @Success      200 {object} models.GameResp
+// @Failure      400 {object} echo.HTTPError
+// @Failure      404 {object} echo.HTTPError
+// @Router       /game/{id} [get]
 func GetGame(ctx echo.Context) error {
 	id := ctx.Param("id")
 	if id == "" {
@@ -111,6 +146,18 @@ func GetGame(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, game.ToResp())
 }
 
+// GetGamesOfUser godoc
+// @Summary      Get games owned by current user
+// @Description  Returns a paginated list of games owned by the authenticated user
+// @Tags         Games
+// @Produce      json
+// @Security     BearerAuth
+// @Param        page     query int true "Page number"
+// @Param        pageSize query int true "Page size"
+// @Success      200 {object} map[string]interface{} "games, nextPage"
+// @Failure      400 {object} echo.HTTPError
+// @Failure      500 {object} echo.HTTPError
+// @Router       /user/game [get]
 func GetGamesOfUser(ctx echo.Context) error {
 	userID, err := models.UserIDFromContext(ctx)
 	if err != nil {
@@ -144,6 +191,19 @@ func GetGamesOfUser(ctx echo.Context) error {
 	})
 }
 
+// UpdateGame godoc
+// @Summary      Update a game
+// @Description  Updates game settings. Only the game owner can update.
+// @Tags         Games
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id   path string                  true "Game UUID"
+// @Param        body body models.UpdateGameParams  true "Fields to update"
+// @Success      200 {object} models.GameResp
+// @Failure      400 {object} echo.HTTPError
+// @Failure      500 {object} echo.HTTPError
+// @Router       /game/{id} [put]
 func UpdateGame(ctx echo.Context) error {
 	id := ctx.Param("id")
 	if id == "" {
@@ -167,6 +227,17 @@ func UpdateGame(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, game.ToResp())
 }
 
+// DeleteGame godoc
+// @Summary      Delete a game
+// @Description  Deletes a game. Only the game owner can delete.
+// @Tags         Games
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path string true "Game UUID"
+// @Success      200 {object} map[string]string "message"
+// @Failure      400 {object} echo.HTTPError
+// @Failure      500 {object} echo.HTTPError
+// @Router       /game/{id} [delete]
 func DeleteGame(ctx echo.Context) error {
 	id := ctx.Param("id")
 	if id == "" {

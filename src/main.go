@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/andy98725/elo-service/src/api"
+	_ "github.com/andy98725/elo-service/src/docs"
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
 	"github.com/andy98725/elo-service/src/worker"
@@ -16,7 +17,22 @@ import (
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
 	"github.com/labstack/gommon/log"
+	httpSwagger "github.com/swaggo/http-swagger"
 )
+
+// @title Elo Matchmaking Service API
+// @version 1.0
+// @description API for matchmaking, game management, user management, and ELO rating.
+
+// @host localhost:8080
+// @BasePath /
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description JWT Bearer token. Prefix with "Bearer ".
+
+//go:generate swag init -g main.go -o docs --parseDependency --parseInternal -d .
 
 func main() {
 	e := echo.New()
@@ -45,6 +61,9 @@ func main() {
 		e.Logger.Fatal(err)
 		panic(err)
 	}
+
+	// Swagger UI
+	e.GET("/swagger/*", echo.WrapHandler(httpSwagger.WrapHandler))
 
 	// Initialize routes
 	if err = api.InitRoutes(e); err != nil {

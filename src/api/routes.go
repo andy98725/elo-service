@@ -13,12 +13,21 @@ import (
 	"github.com/labstack/echo"
 )
 
+// HealthCheck godoc
+// @Summary      Health check
+// @Description  Returns a simple health status
+// @Tags         Health
+// @Produce      json
+// @Success      200 {object} map[string]string "status"
+// @Router       /health [get]
+func HealthCheck(c echo.Context) error {
+	return c.JSON(http.StatusOK, struct {
+		Status string `json:"status"`
+	}{Status: "healthy!"})
+}
+
 func InitRoutes(e *echo.Echo) error {
-	e.GET("/health", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, struct {
-			Status string `json:"status"`
-		}{Status: "healthy!"})
-	})
+	e.GET("/health", HealthCheck)
 
 	if err := user.InitRoutes(e); err != nil {
 		return err

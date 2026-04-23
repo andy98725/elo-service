@@ -24,7 +24,17 @@ type RegisterRequest struct {
 	Password string `json:"password"`
 }
 
-// Register creates the user with the provided username, email, and password.
+// Register godoc
+// @Summary      Register a new user
+// @Description  Creates a user with the provided username, email, and password
+// @Tags         Users
+// @Accept       json
+// @Produce      json
+// @Param        body body RegisterRequest true "Registration payload"
+// @Success      200 {object} models.UserResp
+// @Failure      400 {object} echo.HTTPError
+// @Failure      500 {object} echo.HTTPError
+// @Router       /user [post]
 func Register(ctx echo.Context) error {
 	req := new(RegisterRequest)
 	if err := ctx.Bind(req); err != nil {
