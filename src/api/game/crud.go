@@ -29,6 +29,7 @@ type CreateGameRequest struct {
 	Name                    string  `json:"name"`
 	Description             string  `json:"description"`
 	GuestsAllowed           bool    `json:"guests_allowed"`
+	LobbyEnabled            *bool   `json:"lobby_enabled"`
 	LobbySize               int     `json:"lobby_size"`
 	MatchmakingStrategy     string  `json:"matchmaking_strategy"`
 	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
@@ -50,6 +51,7 @@ func CreateGame(ctx echo.Context) error {
 		Name:                    req.Name,
 		Description:             req.Description,
 		GuestsAllowed:           req.GuestsAllowed,
+		LobbyEnabled:            req.LobbyEnabled,
 		LobbySize:               req.LobbySize,
 		MatchmakingStrategy:     req.MatchmakingStrategy,
 		MatchmakingMachineName:  req.MatchmakingMachineName,
