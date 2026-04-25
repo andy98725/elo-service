@@ -151,7 +151,7 @@ func PairPlayers(ctx context.Context) error {
 
 	for _, key := range keys {
 		queueID := strings.TrimPrefix(key, "queue_")
-		gameID, _ := extRedis.ParseQueueKey(queueID)
+		gameID := extRedis.ParseQueueKey(queueID)
 
 		game, err := models.GetGame(gameID)
 		if err != nil {

@@ -20,6 +20,11 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// maxMetadataBytes caps the size of the `metadata` query param. The value is
+// hashed before use, so the cap exists to bound per-request bandwidth/CPU,
+// not to constrain the key space.
+const maxMetadataBytes = 4096
+
 func JoinQueueWebsocket(ctx echo.Context) error {
 	conn, err := upgrader.Upgrade(ctx.Response(), ctx.Request(), nil)
 	if err != nil {
@@ -34,6 +39,10 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 		return nil
 	}
 	metadata := ctx.QueryParam("metadata")
+	if len(metadata) > maxMetadataBytes {
+		conn.WriteJSON(echo.Map{"status": "error", "error": "metadata exceeds maximum size"})
+		return nil
+	}
 
 	// Listen for match ready before joining queue
 	readyChan := make(chan matchmaking.QueueResult, 1)
@@ -151,6 +160,9 @@ func QueueSize(ctx echo.Context) error {
 		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": "gameID is required"})
 	}
 	metadata := ctx.QueryParam("metadata")
+	if len(metadata) > maxMetadataBytes {
+		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": "metadata exceeds maximum size"})
+	}
 
 	size, err := matchmaking.QueueSize(ctx.Request().Context(), gameID, metadata)
 	if err != nil {
