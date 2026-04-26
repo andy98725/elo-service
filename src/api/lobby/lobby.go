@@ -3,6 +3,7 @@ package lobby
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -121,17 +122,11 @@ func JoinLobby(ctx echo.Context) error {
 		return nil
 	}
 
-	count, err := server.S.Redis.LobbyPlayerCount(rctx, lobbyID)
-	if err != nil {
-		conn.WriteJSON(echo.Map{"status": "error", "error": err.Error()})
-		return nil
-	}
-	if count >= int64(rec.MaxPlayers) {
-		conn.WriteJSON(echo.Map{"status": "error", "error": "lobby is full"})
-		return nil
-	}
-
-	if err := server.S.Redis.AddLobbyPlayer(rctx, lobbyID, id, name, LOBBY_PLAYER_TTL); err != nil {
+	if err := server.S.Redis.AddLobbyPlayerWithCap(rctx, lobbyID, id, name, rec.MaxPlayers, LOBBY_PLAYER_TTL); err != nil {
+		if errors.Is(err, redis.ErrLobbyFull) {
+			conn.WriteJSON(echo.Map{"status": "error", "error": "lobby is full"})
+			return nil
+		}
 		conn.WriteJSON(echo.Map{"status": "error", "error": err.Error()})
 		return nil
 	}
@@ -179,7 +174,7 @@ func runLobbySession(
 	defer kickSub.Close()
 
 	ttlChan := lobbyTTLRefresh(reqCtx, rec.ID, playerID)
-	defer safeClose(ttlChan)
+	defer close(ttlChan)
 
 	inbound := make(chan string, 8)
 	readErr := make(chan error, 1)
@@ -294,7 +289,10 @@ func runHostCommand(ctx context.Context, rec *redis.LobbyRecord, game *models.Ga
 			}))
 			return
 		}
-		// Lobby has dispatched into the matchmaking flow; clean up the lobby record.
+		// Lobby has dispatched into the matchmaking flow; clean up the lobby
+		// record. The host's own deferred cleanup in HostLobby will call
+		// DeleteLobby again when its session ends; that's harmless because
+		// DEL/SREM/HDEL on missing keys are no-ops.
 		server.S.Redis.DeleteLobby(ctx, rec.ID, rec.GameID)
 	default:
 		slog.Info("Unknown host command", "lobbyID", rec.ID, "cmd", cmd)
@@ -354,11 +352,6 @@ func lobbyTTLRefresh(ctx context.Context, lobbyID, playerID string) chan struct{
 		}
 	}()
 	return stop
-}
-
-func safeClose(ch chan struct{}) {
-	defer func() { _ = recover() }()
-	close(ch)
 }
 
 func mustJSON(v any) string {

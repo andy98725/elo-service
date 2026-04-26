@@ -11,7 +11,30 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var ErrLobbyNotFound = errors.New("lobby not found")
+var (
+	ErrLobbyNotFound = errors.New("lobby not found")
+	ErrLobbyFull     = errors.New("lobby is full")
+)
+
+// addLobbyPlayerWithCapScript atomically: checks the current player count,
+// rejects with 0 if it's at or above the cap, otherwise adds the player and
+// sets their TTL key. Replaces a check-then-add sequence that allowed two
+// concurrent joiners to both pass the cap check and exceed MaxPlayers.
+//
+// KEYS[1] = lobby_players_<lobbyID> (hash)
+// KEYS[2] = lobby_player_ttl_<lobbyID>_<playerID> (string with expire)
+// ARGV[1] = max_players, ARGV[2] = playerID, ARGV[3] = displayName,
+// ARGV[4] = ttl in seconds.
+var addLobbyPlayerWithCapScript = redis.NewScript(`
+local count = redis.call('HLEN', KEYS[1])
+local max = tonumber(ARGV[1])
+if count >= max then
+  return 0
+end
+redis.call('HSET', KEYS[1], ARGV[2], ARGV[3])
+redis.call('SET', KEYS[2], '1', 'EX', ARGV[4])
+return 1
+`)
 
 type LobbyRecord struct {
 	ID         string    `json:"id"`
@@ -93,12 +116,31 @@ func (r *Redis) DeleteLobby(ctx context.Context, lobbyID, gameID string) error {
 	return err
 }
 
+// AddLobbyPlayer adds a player unconditionally, used by the host on lobby
+// creation (no capacity gate needed — they're player 1).
 func (r *Redis) AddLobbyPlayer(ctx context.Context, lobbyID, playerID, name string, ttl time.Duration) error {
 	pipe := r.Client.Pipeline()
 	pipe.HSet(ctx, lobbyPlayersKey(lobbyID), playerID, name)
 	pipe.Set(ctx, lobbyPlayerTTLKey(lobbyID, playerID), "1", ttl)
 	_, err := pipe.Exec(ctx)
 	return err
+}
+
+// AddLobbyPlayerWithCap atomically rejects the join if the lobby is at or
+// over maxPlayers; otherwise it adds the player and sets their TTL key.
+// Returns ErrLobbyFull when the cap is reached. Uses a Lua script to close
+// the TOCTOU window between count check and HSET.
+func (r *Redis) AddLobbyPlayerWithCap(ctx context.Context, lobbyID, playerID, name string, maxPlayers int, ttl time.Duration) error {
+	keys := []string{lobbyPlayersKey(lobbyID), lobbyPlayerTTLKey(lobbyID, playerID)}
+	args := []interface{}{maxPlayers, playerID, name, int64(ttl.Seconds())}
+	res, err := addLobbyPlayerWithCapScript.Run(ctx, r.Client, keys, args...).Int64()
+	if err != nil {
+		return err
+	}
+	if res == 0 {
+		return ErrLobbyFull
+	}
+	return nil
 }
 
 func (r *Redis) RemoveLobbyPlayer(ctx context.Context, lobbyID, playerID string) error {

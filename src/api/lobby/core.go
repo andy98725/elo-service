@@ -13,6 +13,11 @@ import (
 const (
 	LOBBY_PLAYER_TTL              = 2 * time.Minute
 	LOBBY_PLAYER_REFRESH_INTERVAL = 30 * time.Second
+	// maxLobbyTags caps how many tags a single lobby record may carry.
+	// FindLobby walks every lobby of a game and runs tagsContainAll for
+	// each, so an unbounded host-supplied list would amplify CPU cost on
+	// every find.
+	maxLobbyTags = 16
 )
 
 type lobbyEvent struct {
@@ -70,8 +75,12 @@ func parseTags(raw string) []string {
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
 		t := strings.TrimSpace(p)
-		if t != "" {
-			out = append(out, t)
+		if t == "" {
+			continue
+		}
+		out = append(out, t)
+		if len(out) >= maxLobbyTags {
+			break
 		}
 	}
 	return out
