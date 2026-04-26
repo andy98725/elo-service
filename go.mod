@@ -1,13 +1,14 @@
 module github.com/andy98725/elo-service
 
-go 1.24.0
-
-toolchain go1.24.13
+go 1.25.0
 
 require (
+	github.com/alicebob/miniredis/v2 v2.37.0
+	github.com/aws/aws-sdk-go-v2 v1.41.1
 	github.com/aws/aws-sdk-go-v2/config v1.32.7
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.7
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.0
+	github.com/glebarez/sqlite v1.11.0
 	github.com/go-gormigrate/gormigrate/v2 v2.1.4
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/hetznercloud/hcloud-go/v2 v2.36.0
@@ -17,11 +18,10 @@ require (
 	github.com/lib/pq v1.10.9
 	golang.org/x/crypto v0.47.0
 	gorm.io/driver/postgres v1.5.7
-	gorm.io/gorm v1.25.12
+	gorm.io/gorm v1.30.0
 )
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.41.1 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.4 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.17 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.17 // indirect
@@ -40,13 +40,22 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/glebarez/go-sqlite v1.21.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.17.0 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
+	modernc.org/libc v1.72.0 // indirect
+	modernc.org/mathutil v1.7.1 // indirect
+	modernc.org/memory v1.11.0 // indirect
+	modernc.org/sqlite v1.50.0 // indirect
 )
 
 require (
@@ -65,7 +74,7 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 )

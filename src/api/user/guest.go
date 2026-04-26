@@ -1,7 +1,6 @@
 package user
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/andy98725/elo-service/src/api/auth"
@@ -19,7 +18,7 @@ func GuestToken(ctx echo.Context) error {
 	}
 
 	if req.DisplayName == "" {
-		return errors.New("missing required fields")
+		return echo.NewHTTPError(http.StatusBadRequest, "displayName is required")
 	}
 	token, claims, err := auth.GuestLogin(req.DisplayName)
 	if err != nil {
