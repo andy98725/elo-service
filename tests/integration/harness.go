@@ -92,6 +92,13 @@ func NewHarness(t *testing.T) *Harness {
 	ctx, cancel := context.WithCancel(context.Background())
 	go worker.RunWorker(ctx, server.S.Shutdown)
 
+	// Wait until the worker has actually subscribed to the matchmaking
+	// trigger channel. Without this, a test that calls TriggerMatchmaking
+	// immediately after NewHarness can race the worker's SUBSCRIBE and
+	// the publish lands with no listener — the worker never wakes and the
+	// match is never paired, surfacing as a flaky 5-second timeout.
+	waitForSubscriber(t, redisClient, extredis.MatchmakingTriggerChannel, 2*time.Second)
+
 	h := &Harness{
 		T:         t,
 		Server:    ts,
@@ -116,4 +123,17 @@ func NewHarness(t *testing.T) *Harness {
 
 func (h *Harness) BaseURL() string {
 	return h.Server.URL
+}
+
+func waitForSubscriber(t *testing.T, r *extredis.Redis, channel string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		counts, err := r.Client.PubSubNumSub(context.Background(), channel).Result()
+		if err == nil && counts[channel] >= 1 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("worker did not subscribe to %q within %v", channel, timeout)
 }

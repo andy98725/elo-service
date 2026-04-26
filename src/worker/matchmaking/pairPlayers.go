@@ -24,6 +24,23 @@ type JoinQueueResult struct {
 	QueueID   string
 }
 
+// JoinQueue places a player in the queue for (gameID, metadata).
+//
+// When game.MetadataEnabled is true, distinct metadata values land in
+// distinct sub-queues -- this is the segmentation feature (mode/region/
+// version). Two consequences worth being aware of:
+//
+//  1. A single player CAN be in multiple sub-queues simultaneously by
+//     calling JoinQueue with different metadata. AddPlayerToQueueWithTTL
+//     only dedupes within one queue key. This is intentional: it lets a
+//     player search "casual OR ranked" at once. The first sub-queue to
+//     fill its lobby wins; orphan entries in the others time out via TTL.
+//
+//  2. If the owner toggles MetadataEnabled off after players have queued
+//     with metadata, those entries linger in their sub-queues. PairPlayers
+//     iterates every "queue_*" key (including composite ones), so they
+//     still get matched as soon as a sub-queue reaches LobbySize, or
+//     expire via TTL. No manual cleanup needed.
 func JoinQueue(ctx context.Context, playerID string, gameID string, metadata string) (*JoinQueueResult, error) {
 	game, err := models.GetGame(gameID)
 	if err != nil {
