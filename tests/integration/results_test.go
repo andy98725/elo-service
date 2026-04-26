@@ -30,39 +30,49 @@ func setupMatchedGame(t *testing.T, h *Harness) (gameID string, g1Token string, 
 	ws2 := WebsocketConnect(t, fmt.Sprintf("%s/match/join?gameID=%s", h.BaseURL(), gameID), g2Token)
 	defer ws2.Close()
 
-	readMsg := func(ws *websocket.Conn) map[string]interface{} {
+	readMsg := func(ws *websocket.Conn) (map[string]interface{}, error) {
 		ws.SetReadDeadline(time.Now().Add(5 * time.Second))
 		_, msg, err := ws.ReadMessage()
 		if err != nil {
-			t.Fatalf("failed to read message: %v", err)
+			return nil, fmt.Errorf("read failed: %w", err)
 		}
 		var resp map[string]interface{}
 		json.Unmarshal(msg, &resp)
-		return resp
+		return resp, nil
 	}
 
-	readMsg(ws1)
-	readMsg(ws2)
+	if _, err := readMsg(ws1); err != nil {
+		t.Fatalf("ws1 initial read: %v", err)
+	}
+	if _, err := readMsg(ws2); err != nil {
+		t.Fatalf("ws2 initial read: %v", err)
+	}
 
 	TriggerMatchmaking(t)
 
-	waitForMatchFound := func(ws *websocket.Conn) {
+	waitForMatchFound := func(ws *websocket.Conn) error {
 		for {
-			resp := readMsg(ws)
+			resp, err := readMsg(ws)
+			if err != nil {
+				return err
+			}
 			if resp["status"] == "match_found" {
-				return
+				return nil
 			}
 			if resp["status"] == "error" {
-				t.Fatalf("got error: %v", resp["error"])
+				return fmt.Errorf("server reported error: %v", resp["error"])
 			}
 		}
 	}
 
-	done := make(chan struct{}, 2)
-	go func() { waitForMatchFound(ws1); done <- struct{}{} }()
-	go func() { waitForMatchFound(ws2); done <- struct{}{} }()
-	<-done
-	<-done
+	errs := make(chan error, 2)
+	go func() { errs <- waitForMatchFound(ws1) }()
+	go func() { errs <- waitForMatchFound(ws2) }()
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("waitForMatchFound: %v", err)
+		}
+	}
 
 	var match models.Match
 	if err := server.S.DB.Where("game_id = ? AND status = ?", gameID, "started").First(&match).Error; err != nil {

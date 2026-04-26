@@ -1,6 +1,7 @@
 package game
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,6 +12,18 @@ import (
 	"github.com/andy98725/elo-service/src/util"
 	"github.com/labstack/echo"
 )
+
+// isUniqueConstraintViolation reports whether err looks like a uniqueness
+// violation across the supported drivers (Postgres in production, SQLite in
+// integration tests). The two drivers return very different message formats.
+func isUniqueConstraintViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "duplicate key value violates unique constraint") ||
+		strings.Contains(msg, "UNIQUE constraint failed")
+}
 
 type CreateGameRequest struct {
 	Name                    string  `json:"name"`
@@ -43,12 +56,11 @@ func CreateGame(ctx echo.Context) error {
 		ELOStrategy:             req.ELOStrategy,
 	}, *user)
 	if err != nil {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "duplicate key value violates unique constraint") {
-			if strings.Contains(errMsg, "name") {
-				return echo.NewHTTPError(http.StatusBadRequest, "game name already taken")
+		if isUniqueConstraintViolation(err) {
+			if strings.Contains(err.Error(), "name") {
+				return echo.NewHTTPError(http.StatusConflict, "game name already taken")
 			}
-			return echo.NewHTTPError(http.StatusBadRequest, "game already exists")
+			return echo.NewHTTPError(http.StatusConflict, "game already exists")
 		}
 
 		slog.Error("Error creating game", "error", err)
@@ -142,6 +154,9 @@ func UpdateGame(ctx echo.Context) error {
 	user := ctx.Get("user").(*models.User)
 	game, err := models.UpdateGame(id, *req, *user)
 	if err != nil {
+		if errors.Is(err, models.ErrNotGameOwner) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "Error updating game: "+err.Error())
 	}
 
@@ -157,6 +172,9 @@ func DeleteGame(ctx echo.Context) error {
 	user := ctx.Get("user").(*models.User)
 	err := models.DeleteGame(id, *user)
 	if err != nil {
+		if errors.Is(err, models.ErrNotGameOwner) {
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "Error deleting game: "+err.Error())
 	}
 

@@ -33,14 +33,11 @@ func TestCreateGameDuplicateName(t *testing.T) {
 
 	CreateGame(t, h.BaseURL(), token, "UniqueGame", 2)
 
-	resp := DoReqAllowAnyStatus(t, "POST", h.BaseURL()+"/game", map[string]interface{}{
+	DoReq(t, "POST", h.BaseURL()+"/game", map[string]interface{}{
 		"name":                     "UniqueGame",
 		"lobby_size":               2,
 		"matchmaking_machine_name": "docker.io/test/game:latest",
-	}, token)
-	if resp.StatusCode == http.StatusOK {
-		t.Fatal("expected duplicate game name to be rejected")
-	}
+	}, token, http.StatusConflict)
 }
 
 func TestCreateGameRequiresAuth(t *testing.T) {
@@ -111,5 +108,5 @@ func TestDeleteGameWrongOwner(t *testing.T) {
 	game := CreateGame(t, h.BaseURL(), ownerToken, "ProtectedGame", 2)
 	gameID := game["id"].(string)
 
-	DoReq(t, "DELETE", fmt.Sprintf("%s/game/%s", h.BaseURL(), gameID), nil, intruderToken, http.StatusInternalServerError)
+	DoReq(t, "DELETE", fmt.Sprintf("%s/game/%s", h.BaseURL(), gameID), nil, intruderToken, http.StatusForbidden)
 }

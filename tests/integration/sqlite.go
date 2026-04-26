@@ -1,8 +1,21 @@
 package integration
 
+// The CREATE TABLE statements below are hand-rolled because the production
+// migrations use Postgres-specific features (advisory locks, pq.StringArray
+// with `text[]`, gen_random_uuid()) that SQLite does not support. Whenever
+// you add or rename a column on a model in src/models, mirror the change
+// here. assertSchemaMatchesModels (run from migrateForSQLite) compares the
+// columns GORM derives from each model against this schema and fails fast
+// with a clear error if they drift.
+
 import (
+	"fmt"
+	"sync"
+
+	"github.com/andy98725/elo-service/src/models"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
 
 func migrateForSQLite(db *gorm.DB) error {
@@ -97,5 +110,33 @@ func migrateForSQLite(db *gorm.DB) error {
 		}
 	})
 
+	return assertSchemaMatchesModels(db)
+}
+
+// assertSchemaMatchesModels parses each GORM model and confirms every column
+// it expects exists in the SQLite test schema. Catches the "added a field on
+// a model and forgot to update sqlite.go" failure mode early with a clear
+// error instead of an opaque "no such column" deep inside a test.
+func assertSchemaMatchesModels(db *gorm.DB) error {
+	cache := &sync.Map{}
+	ns := schema.NamingStrategy{}
+	checks := []interface{}{
+		&models.User{}, &models.Game{}, &models.Match{},
+		&models.MatchResult{}, &models.Rating{},
+	}
+	for _, m := range checks {
+		s, err := schema.Parse(m, cache, ns)
+		if err != nil {
+			return fmt.Errorf("schema.Parse %T: %w", m, err)
+		}
+		for _, col := range s.DBNames {
+			if !db.Migrator().HasColumn(m, col) {
+				return fmt.Errorf(
+					"schema drift: model %T declares column %q but it is missing from tests/integration/sqlite.go — add it to the CREATE TABLE",
+					m, col,
+				)
+			}
+		}
+	}
 	return nil
 }

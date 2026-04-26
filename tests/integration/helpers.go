@@ -15,11 +15,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type RawResponse struct {
-	StatusCode int
-	Body       map[string]interface{}
-}
-
 func doRequest(t *testing.T, method string, urlStr string, body any, token string) (int, []byte) {
 	t.Helper()
 
@@ -59,14 +54,6 @@ func doRequest(t *testing.T, method string, urlStr string, body any, token strin
 		t.Fatalf("failed to read response: %v", err)
 	}
 	return resp.StatusCode, respBytes
-}
-
-func DoReqAllowAnyStatus(t *testing.T, method string, urlStr string, body any, token string) RawResponse {
-	t.Helper()
-	status, respBytes := doRequest(t, method, urlStr, body, token)
-	var result map[string]interface{}
-	json.Unmarshal(respBytes, &result)
-	return RawResponse{StatusCode: status, Body: result}
 }
 
 func DoReq(t *testing.T, method string, urlStr string, body any, token string, expectedStatus int) map[string]interface{} {

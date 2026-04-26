@@ -21,7 +21,7 @@ func TestGuestLogin(t *testing.T) {
 
 func TestGuestLoginMissingName(t *testing.T) {
 	h := NewHarness(t)
-	DoReq(t, "POST", h.BaseURL()+"/guest/login", map[string]string{"displayName": ""}, "", http.StatusInternalServerError)
+	DoReq(t, "POST", h.BaseURL()+"/guest/login", map[string]string{"displayName": ""}, "", http.StatusBadRequest)
 }
 
 func TestUserRegistration(t *testing.T) {
@@ -45,17 +45,11 @@ func TestUserRegistrationDuplicateUsername(t *testing.T) {
 
 	RegisterUser(t, h.BaseURL(), "bob", "bob@example.com", "pass")
 
-	// Duplicate insert is rejected. The exact HTTP status depends on the DB driver's
-	// error message format (400 on Postgres, 500 on SQLite), so we just verify
-	// it doesn't return 200.
-	resp := DoReqAllowAnyStatus(t, "POST", h.BaseURL()+"/user", map[string]string{
+	DoReq(t, "POST", h.BaseURL()+"/user", map[string]string{
 		"username": "bob",
 		"email":    "bob2@example.com",
 		"password": "pass",
-	}, "")
-	if resp.StatusCode == http.StatusOK {
-		t.Fatal("expected duplicate username to be rejected")
-	}
+	}, "", http.StatusConflict)
 }
 
 func TestUserLogin(t *testing.T) {

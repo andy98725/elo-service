@@ -18,6 +18,10 @@ const (
 )
 
 var MATCHMAKING_STRATEGIES = []string{MATCHMAKING_STRATEGY_RANDOM, MATCHMAKING_STRATEGY_RATING}
+
+// ErrNotGameOwner is returned by mutation operations when the caller is not
+// the owner of the target game. Handlers should map this to HTTP 403.
+var ErrNotGameOwner = errors.New("not the owner of this game")
 var ELO_STRATEGIES = []string{ELO_STRATEGY_UNRANKED, ELO_STRATEGY_CLASSIC}
 
 type Game struct {
@@ -176,7 +180,7 @@ func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
 		return nil, err
 	}
 	if game.OwnerID != owner.ID {
-		return nil, errors.New("you are not the owner of this game")
+		return nil, ErrNotGameOwner
 	}
 
 	if params.Name != "" {
@@ -233,7 +237,7 @@ func DeleteGame(id string, owner User) error {
 		return err
 	}
 	if game.OwnerID != owner.ID {
-		return errors.New("you are not the owner of this game")
+		return ErrNotGameOwner
 	}
 
 	result := server.S.DB.Delete(game)

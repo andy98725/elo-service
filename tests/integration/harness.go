@@ -16,7 +16,7 @@ import (
 	"github.com/andy98725/elo-service/src/worker"
 	"github.com/labstack/echo"
 	"github.com/labstack/echo/middleware"
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -31,6 +31,12 @@ type Harness struct {
 	cancelFn  context.CancelFunc
 }
 
+// NewHarness boots a fresh in-process server (miniredis + SQLite + mocks).
+//
+// Tests using this harness MUST NOT call t.Parallel(): the harness reassigns
+// the package-global server.S, and concurrent assignments would race and
+// cross-contaminate state between tests. The default serial test ordering is
+// what makes this safe.
 func NewHarness(t *testing.T) *Harness {
 	t.Helper()
 
