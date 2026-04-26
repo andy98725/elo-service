@@ -20,6 +20,11 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// maxMetadataBytes caps the size of the `metadata` query param. The value is
+// hashed before use, so the cap exists to bound per-request bandwidth/CPU,
+// not to constrain the key space.
+const maxMetadataBytes = 4096
+
 func JoinQueueWebsocket(ctx echo.Context) error {
 	conn, err := upgrader.Upgrade(ctx.Response(), ctx.Request(), nil)
 	if err != nil {
@@ -33,20 +38,25 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 		conn.WriteJSON(echo.Map{"status": "error", "error": "gameID is required"})
 		return nil
 	}
+	metadata := ctx.QueryParam("metadata")
+	if len(metadata) > maxMetadataBytes {
+		conn.WriteJSON(echo.Map{"status": "error", "error": "metadata exceeds maximum size"})
+		return nil
+	}
 
 	// Listen for match ready before joining queue
 	readyChan := make(chan matchmaking.QueueResult, 1)
 	matchmaking.NotifyOnReady(ctx.Request().Context(), id, gameID, readyChan)
 
-	size, err := matchmaking.JoinQueue(ctx.Request().Context(), id, gameID)
+	joinResult, err := matchmaking.JoinQueue(ctx.Request().Context(), id, gameID, metadata)
 	if err != nil {
 		slog.Warn("Failed to join queue", "error", err)
 		conn.WriteJSON(echo.Map{"status": "error", "error": err.Error()})
 		return nil
 	}
 
-	// Start TTL refresh goroutine
-	ttlChan := ttlRefresh(ctx.Request().Context(), gameID, id)
+	// Start TTL refresh goroutine using the same queue ID the player joined
+	ttlChan := ttlRefresh(ctx.Request().Context(), joinResult.QueueID, id)
 
 	// Send searching status every 5 seconds
 	status := "searching"
@@ -54,7 +64,7 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 	defer close(*statusChan)
 
 	// Queue is joined, now we need to wait for the match to start
-	conn.WriteJSON(echo.Map{"status": "queue_joined", "players_in_queue": size})
+	conn.WriteJSON(echo.Map{"status": "queue_joined", "players_in_queue": joinResult.QueueSize})
 
 	for {
 		select {
@@ -96,7 +106,7 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 	}
 }
 
-func ttlRefresh(ctx context.Context, gameID string, id string) *chan struct{} {
+func ttlRefresh(ctx context.Context, queueID string, id string) *chan struct{} {
 	ttlRefresh := make(chan struct{})
 	go func() {
 		matchmakingTTLTicker := time.NewTicker(matchmaking.QUEUE_REFRESH_INTERVAL)
@@ -105,9 +115,8 @@ func ttlRefresh(ctx context.Context, gameID string, id string) *chan struct{} {
 		for {
 			select {
 			case <-matchmakingTTLTicker.C:
-				// Refresh TTL to keep player in queue
-				if err := server.S.Redis.RefreshPlayerQueueTTL(ctx, gameID, id, matchmaking.QUEUE_TTL); err != nil {
-					slog.Warn("Failed to refresh player queue TTL", "error", err, "playerID", id, "gameID", gameID)
+				if err := server.S.Redis.RefreshPlayerQueueTTL(ctx, queueID, id, matchmaking.QUEUE_TTL); err != nil {
+					slog.Warn("Failed to refresh player queue TTL", "error", err, "playerID", id, "queueID", queueID)
 				}
 			case <-ttlRefresh:
 				return
@@ -150,8 +159,12 @@ func QueueSize(ctx echo.Context) error {
 	if gameID == "" {
 		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": "gameID is required"})
 	}
+	metadata := ctx.QueryParam("metadata")
+	if len(metadata) > maxMetadataBytes {
+		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": "metadata exceeds maximum size"})
+	}
 
-	size, err := matchmaking.QueueSize(ctx.Request().Context(), gameID)
+	size, err := matchmaking.QueueSize(ctx.Request().Context(), gameID, metadata)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}

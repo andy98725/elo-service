@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/andy98725/elo-service/src/external/hetzner"
+	extRedis "github.com/andy98725/elo-service/src/external/redis"
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
 )
@@ -18,37 +19,77 @@ const (
 	QUEUE_REFRESH_INTERVAL = 30 * time.Second
 )
 
-func JoinQueue(ctx context.Context, playerID string, gameID string) (int64, error) {
-	_, err := models.GetGame(gameID)
+type JoinQueueResult struct {
+	QueueSize int64
+	QueueID   string
+}
+
+// JoinQueue places a player in the queue for (gameID, metadata).
+//
+// When game.MetadataEnabled is true, distinct metadata values land in
+// distinct sub-queues -- this is the segmentation feature (mode/region/
+// version). Two consequences worth being aware of:
+//
+//  1. A single player CAN be in multiple sub-queues simultaneously by
+//     calling JoinQueue with different metadata. AddPlayerToQueueWithTTL
+//     only dedupes within one queue key. This is intentional: it lets a
+//     player search "casual OR ranked" at once. The first sub-queue to
+//     fill its lobby wins; orphan entries in the others time out via TTL.
+//
+//  2. If the owner toggles MetadataEnabled off after players have queued
+//     with metadata, those entries linger in their sub-queues. PairPlayers
+//     iterates every "queue_*" key (including composite ones), so they
+//     still get matched as soon as a sub-queue reaches LobbySize, or
+//     expire via TTL. No manual cleanup needed.
+func JoinQueue(ctx context.Context, playerID string, gameID string, metadata string) (*JoinQueueResult, error) {
+	game, err := models.GetGame(gameID)
+	if err != nil {
+		return nil, err
+	}
+
+	if !game.MetadataEnabled {
+		metadata = ""
+	}
+	queueID := extRedis.QueueKey(gameID, metadata)
+
+	if err := server.S.Redis.AddPlayerToQueueWithTTL(ctx, queueID, playerID, QUEUE_TTL); err != nil {
+		return nil, err
+	}
+
+	size, err := server.S.Redis.GameQueueSize(ctx, queueID)
+	if err != nil {
+		return nil, err
+	}
+
+	return &JoinQueueResult{QueueSize: size, QueueID: queueID}, nil
+}
+
+func QueueSize(ctx context.Context, gameID string, metadata string) (int64, error) {
+	game, err := models.GetGame(gameID)
 	if err != nil {
 		return 0, err
 	}
 
-	// Use TTL version for automatic cleanup after 5 minutes
-	// TTL will be refreshed every 30 seconds while websocket is active
-	if err := server.S.Redis.AddPlayerToQueueWithTTL(ctx, gameID, playerID, QUEUE_TTL); err != nil {
-		return 0, err
+	if !game.MetadataEnabled {
+		metadata = ""
 	}
+	queueID := extRedis.QueueKey(gameID, metadata)
 
-	return server.S.Redis.GameQueueSize(ctx, gameID)
+	return server.S.Redis.GameQueueSize(ctx, queueID)
 }
 
-func QueueSize(ctx context.Context, gameID string) (int64, error) {
-	_, err := models.GetGame(gameID)
-	if err != nil {
-		return 0, err
-	}
-
-	return server.S.Redis.GameQueueSize(ctx, gameID)
-}
-
-func LeaveQueue(ctx context.Context, playerID string, gameID string) error {
-	_, err := models.GetGame(gameID)
+func LeaveQueue(ctx context.Context, playerID string, gameID string, metadata string) error {
+	game, err := models.GetGame(gameID)
 	if err != nil {
 		return err
 	}
 
-	return server.S.Redis.RemovePlayerFromQueue(ctx, gameID, playerID)
+	if !game.MetadataEnabled {
+		metadata = ""
+	}
+	queueID := extRedis.QueueKey(gameID, metadata)
+
+	return server.S.Redis.RemovePlayerFromQueue(ctx, queueID, playerID)
 }
 
 type QueueResult struct {
@@ -112,7 +153,6 @@ func startMatch(ctx context.Context, gameID string, game *models.Game, players [
 }
 
 func PairPlayers(ctx context.Context) error {
-	// Get all queue keys
 	keys, err := server.S.Redis.AllQueues(ctx)
 	if err != nil {
 		slog.Error("Failed to get all queues", "error", err)
@@ -127,7 +167,8 @@ func PairPlayers(ctx context.Context) error {
 	}()
 
 	for _, key := range keys {
-		gameID := strings.TrimPrefix(key, "queue_")
+		queueID := strings.TrimPrefix(key, "queue_")
+		gameID := extRedis.ParseQueueKey(queueID)
 
 		game, err := models.GetGame(gameID)
 		if err != nil {
@@ -135,25 +176,23 @@ func PairPlayers(ctx context.Context) error {
 			continue
 		}
 
-		qs, err := server.S.Redis.GameQueueSize(ctx, gameID)
+		qs, err := server.S.Redis.GameQueueSize(ctx, queueID)
 		if err != nil {
-			slog.Error("Failed to get queue size", "error", err, "gameID", gameID)
+			slog.Error("Failed to get queue size", "error", err, "queueID", queueID)
 			continue
 		}
 
-		// Loop through queue until all players are matched
-		slog.Debug("Pairing players", "gameID", gameID, "queueSize", qs)
-		for queueSize, err := server.S.Redis.GameQueueSize(ctx, gameID); err == nil && queueSize >= int64(game.LobbySize); queueSize, err = server.S.Redis.GameQueueSize(ctx, gameID) {
-			players, err := server.S.Redis.PopPlayersFromQueue(ctx, gameID, game.LobbySize)
+		slog.Debug("Pairing players", "queueID", queueID, "queueSize", qs)
+		for queueSize, err := server.S.Redis.GameQueueSize(ctx, queueID); err == nil && queueSize >= int64(game.LobbySize); queueSize, err = server.S.Redis.GameQueueSize(ctx, queueID) {
+			players, err := server.S.Redis.PopPlayersFromQueue(ctx, queueID, game.LobbySize)
 			if err != nil {
-				slog.Error("Failed to pop players from queue", "error", err, "gameID", gameID)
+				slog.Error("Failed to pop players from queue", "error", err, "queueID", queueID)
 				continue
 			}
 
-			// If not enough players, put them back in queue
 			if len(players) < game.LobbySize {
-				server.S.Redis.PushPlayersToQueue(ctx, gameID, players)
-				slog.Info("Not enough players, putting them back in queue", "gameID", gameID, "players", players)
+				server.S.Redis.PushPlayersToQueue(ctx, queueID, players)
+				slog.Info("Not enough players, putting them back in queue", "queueID", queueID, "players", players)
 				continue
 			}
 

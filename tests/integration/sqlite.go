@@ -43,6 +43,7 @@ func migrateForSQLite(db *gorm.DB) error {
 			default_rating INTEGER DEFAULT 1000,
 			public_results INTEGER DEFAULT 1,
 			public_match_logs INTEGER DEFAULT 1,
+			metadata_enabled INTEGER DEFAULT 0,
 			FOREIGN KEY (owner_id) REFERENCES users(id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS matches (

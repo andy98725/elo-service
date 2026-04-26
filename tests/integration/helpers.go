@@ -156,3 +156,12 @@ func QueueSize(t *testing.T, baseURL, token, gameID string) float64 {
 	size, _ := resp["players_in_queue"].(float64)
 	return size
 }
+
+func QueueSizeMeta(t *testing.T, baseURL, token, gameID, metadata string) float64 {
+	t.Helper()
+	resp := DoReq(t, "GET",
+		fmt.Sprintf("%s/match/size?gameID=%s&metadata=%s", baseURL, gameID, metadata),
+		nil, token, http.StatusOK)
+	size, _ := resp["players_in_queue"].(float64)
+	return size
+}

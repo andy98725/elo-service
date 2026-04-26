@@ -2,8 +2,11 @@ package redis
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -11,6 +14,36 @@ import (
 
 var ErrPlayerAlreadyInQueue = errors.New("player already in queue")
 var ErrPlayerNotInQueue = errors.New("player not in queue")
+
+// MetadataSeparator joins the gameID and the metadata fingerprint in a queue key.
+// "::" never appears in a UUID gameID or in a hex-encoded hash, so the gameID is
+// recoverable from the composite key by splitting on the first occurrence.
+const MetadataSeparator = "::"
+
+// QueueKey builds the queue identifier for a (gameID, metadata) pair. The
+// metadata is treated as an opaque byte string and hashed, so arbitrary
+// client-defined values (including JSON) produce a fixed-size, charset-safe
+// suffix. Two clients are placed in the same queue iff their metadata bytes
+// are identical -- callers that want logical equality (e.g. JSON with
+// reordered keys) must canonicalize before passing it in.
+func QueueKey(gameID string, metadata string) string {
+	if metadata == "" {
+		return gameID
+	}
+	sum := sha256.Sum256([]byte(metadata))
+	return gameID + MetadataSeparator + hex.EncodeToString(sum[:])
+}
+
+// ParseQueueKey extracts the gameID from a composite queue key produced by
+// QueueKey. The metadata fingerprint is intentionally not returned: the
+// matchmaking worker only needs the gameID for game-config lookups, and the
+// original metadata cannot be recovered from its hash.
+func ParseQueueKey(queueKey string) (gameID string) {
+	if idx := strings.Index(queueKey, MetadataSeparator); idx != -1 {
+		return queueKey[:idx]
+	}
+	return queueKey
+}
 
 type Redis struct {
 	Client *redis.Client

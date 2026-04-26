@@ -47,28 +47,25 @@ func CleanupExpiredPlayers(ctx context.Context) error {
 	}
 
 	for _, key := range keys {
-		gameID := strings.TrimPrefix(key, "queue_")
+		queueID := strings.TrimPrefix(key, "queue_")
 
-		// Get all players in the queue
-		players, err := server.S.Redis.AllPlayersInQueue(ctx, gameID)
+		players, err := server.S.Redis.AllPlayersInQueue(ctx, queueID)
 		if err != nil {
 			return err
 		}
 
-		// Check each player's TTL key
 		for _, playerID := range players {
-			alive, err := server.S.Redis.IsPlayerConnectionAlive(ctx, gameID, playerID)
+			alive, err := server.S.Redis.IsPlayerConnectionAlive(ctx, queueID, playerID)
 			if err != nil {
-				slog.Info("Failed to check player queue status", "playerID", playerID, "gameID", gameID)
+				slog.Info("Failed to check player queue status", "playerID", playerID, "queueID", queueID)
 				continue
 			}
 
 			if !alive {
-				// Player's TTL has expired, remove them from the queue
-				if err := server.S.Redis.RemovePlayerFromQueue(ctx, gameID, playerID); err != nil {
-					slog.Error("Failed to remove expired player from queue", "playerID", playerID, "gameID", gameID)
+				if err := server.S.Redis.RemovePlayerFromQueue(ctx, queueID, playerID); err != nil {
+					slog.Error("Failed to remove expired player from queue", "playerID", playerID, "queueID", queueID)
 				} else {
-					slog.Info("Removed expired player from queue", "playerID", playerID, "gameID", gameID)
+					slog.Info("Removed expired player from queue", "playerID", playerID, "queueID", queueID)
 				}
 			}
 		}
