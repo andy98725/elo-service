@@ -9,6 +9,17 @@ import (
 	"gorm.io/gorm"
 )
 
+// GetMatch godoc
+// @Summary      Get a match by ID
+// @Description  Returns match details. User must be a participant or game owner.
+// @Tags         Matches
+// @Produce      json
+// @Security     BearerAuth
+// @Param        matchID path string true "Match UUID"
+// @Success      200 {object} models.MatchResp
+// @Failure      404 {object} echo.HTTPError
+// @Failure      500 {object} echo.HTTPError
+// @Router       /match/{matchID} [get]
 func GetMatch(ctx echo.Context) error {
 	matchID := ctx.Param("matchID")
 	userID, err := models.UserIDFromContext(ctx)
@@ -32,6 +43,19 @@ func GetMatch(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, match.ToResp())
 }
 
+// GetMatchesOfGame godoc
+// @Summary      Get matches for a game
+// @Description  Returns a paginated list of matches for a specific game
+// @Tags         Matches
+// @Produce      json
+// @Security     BearerAuth
+// @Param        gameID   path  string true "Game UUID"
+// @Param        page     query int    false "Page number (default 0)"
+// @Param        pageSize query int    false "Page size (default 10)"
+// @Success      200 {object} map[string]interface{} "matches, nextPage"
+// @Failure      400 {object} echo.HTTPError
+// @Failure      500 {object} echo.HTTPError
+// @Router       /match/game/{gameID} [get]
 func GetMatchesOfGame(ctx echo.Context) error {
 	gameID := ctx.Param("gameID")
 	page, pageSize, err := util.ParsePagination(ctx)
@@ -61,7 +85,19 @@ func GetMatchesOfGame(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, echo.Map{"matches": matchesResp, "nextPage": nextPage})
 }
 
-// Admin only
+// GetMatches godoc
+// @Summary      List all matches (admin)
+// @Description  Returns a paginated list of all matches. Admin only.
+// @Tags         Matches
+// @Produce      json
+// @Security     BearerAuth
+// @Param        page     query int false "Page number (default 0)"
+// @Param        pageSize query int false "Page size (default 10)"
+// @Success      200 {object} map[string]interface{} "matches, nextPage"
+// @Failure      400 {object} echo.HTTPError
+// @Failure      403 {object} echo.HTTPError
+// @Failure      500 {object} echo.HTTPError
+// @Router       /matches [get]
 func GetMatches(ctx echo.Context) error {
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {

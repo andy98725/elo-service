@@ -25,6 +25,15 @@ var upgrader = websocket.Upgrader{
 // not to constrain the key space.
 const maxMetadataBytes = 4096
 
+// JoinQueueWebsocket godoc
+// @Summary      Join matchmaking queue (WebSocket)
+// @Description  Upgrades to a WebSocket connection and joins the matchmaking queue for a game. Sends status updates until a match is found.
+// @Tags         Matchmaking
+// @Security     BearerAuth
+// @Param        gameID   query string true  "Game UUID to queue for"
+// @Param        metadata query string false "Optional sub-queue key (only honored when game.metadata_enabled=true; capped at 4 KB)"
+// @Param        token    query string false "JWT token (alternative to Authorization header)"
+// @Router       /match/join [get]
 func JoinQueueWebsocket(ctx echo.Context) error {
 	conn, err := upgrader.Upgrade(ctx.Response(), ctx.Request(), nil)
 	if err != nil {
@@ -154,6 +163,18 @@ func statusRefresh(ctx context.Context, conn *websocket.Conn, status *string) *c
 	return &statusRefresh
 }
 
+// QueueSize godoc
+// @Summary      Get matchmaking queue size
+// @Description  Returns the number of players currently in the matchmaking queue for a game
+// @Tags         Matchmaking
+// @Produce      json
+// @Security     BearerAuth
+// @Param        gameID   query string true  "Game UUID"
+// @Param        metadata query string false "Sub-queue key (only honored when game.metadata_enabled=true)"
+// @Success      200 {object} map[string]interface{} "players_in_queue"
+// @Failure      400 {object} echo.HTTPError
+// @Failure      500 {object} echo.HTTPError
+// @Router       /match/size [get]
 func QueueSize(ctx echo.Context) error {
 	gameID := ctx.QueryParam("gameID")
 	if gameID == "" {

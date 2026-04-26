@@ -8,6 +8,15 @@ import (
 	"github.com/labstack/echo"
 )
 
+// GetUser godoc
+// @Summary      Get current user
+// @Description  Returns the currently authenticated user's profile
+// @Tags         Users
+// @Produce      json
+// @Security     BearerAuth
+// @Success      200 {object} models.UserResp
+// @Failure      500 {object} echo.HTTPError
+// @Router       /user [get]
 func GetUser(ctx echo.Context) error {
 	userID, err := models.UserIDFromContext(ctx)
 	if err != nil {
@@ -22,7 +31,19 @@ func GetUser(ctx echo.Context) error {
 	return ctx.JSON(200, user.ToResp())
 }
 
-// Admin only
+// GetUsers godoc
+// @Summary      List all users (admin)
+// @Description  Returns a paginated list of all users. Admin only.
+// @Tags         Users
+// @Produce      json
+// @Security     BearerAuth
+// @Param        page     query int false "Page number (default 0)"
+// @Param        pageSize query int false "Page size (default 10)"
+// @Success      200 {object} map[string]interface{} "users, nextPage"
+// @Failure      400 {object} echo.HTTPError
+// @Failure      403 {object} echo.HTTPError
+// @Failure      500 {object} echo.HTTPError
+// @Router       /users [get]
 func GetUsers(ctx echo.Context) error {
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
@@ -40,15 +61,25 @@ func GetUsers(ctx echo.Context) error {
 	})
 }
 
-// UpdateUser updates the user's username, email, and password
-// matching the provided ID.
-// Requires admin.
-// Returns the user struct.
+// UpdateUser godoc
+// @Summary      Update current user
+// @Description  Updates the authenticated user's profile (not yet implemented)
+// @Tags         Users
+// @Security     BearerAuth
+// @Success      200
+// @Router       /user [put]
 func UpdateUser(ctx echo.Context) error {
 	//TODO
 	return nil
 }
 
+// DeleteUser godoc
+// @Summary      Delete current user
+// @Description  Deletes the authenticated user's account (not yet implemented)
+// @Tags         Users
+// @Security     BearerAuth
+// @Success      200
+// @Router       /user [delete]
 func DeleteUser(ctx echo.Context) error {
 	//TODO
 	return nil

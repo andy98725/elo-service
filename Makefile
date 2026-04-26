@@ -1,4 +1,4 @@
-.PHONY: fresh up down build logs clean example-run example-push
+.PHONY: fresh up down build logs clean swagger example-run example-push
 
 fresh: down build up logs
 
@@ -13,6 +13,9 @@ build:
 
 logs:
 	docker-compose logs -f
+
+swagger:
+	swag init -g src/main.go -o src/docs --parseDependency --parseInternal
 
 clean:
 	docker-compose down -v
