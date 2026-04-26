@@ -75,3 +75,53 @@ func CleanupExpiredPlayers(ctx context.Context) error {
 
 	return nil
 }
+
+// CleanupExpiredLobbies sweeps lobbies whose host has gone away (TTL expired)
+// and prunes member rows whose individual TTL key is gone.
+func CleanupExpiredLobbies(ctx context.Context) error {
+	indexKeys, err := server.S.Redis.AllLobbyIndexKeys(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, indexKey := range indexKeys {
+		gameID := strings.TrimPrefix(indexKey, "lobby_index_")
+		lobbies, err := server.S.Redis.LobbiesForGame(ctx, gameID)
+		if err != nil {
+			slog.Warn("Failed to read lobbies for game", "error", err, "gameID", gameID)
+			continue
+		}
+
+		for _, rec := range lobbies {
+			players, err := server.S.Redis.LobbyPlayers(ctx, rec.ID)
+			if err != nil {
+				continue
+			}
+			hostAlive := false
+			for playerID := range players {
+				alive, err := server.S.Redis.IsLobbyPlayerAlive(ctx, rec.ID, playerID)
+				if err != nil {
+					continue
+				}
+				if !alive {
+					if err := server.S.Redis.RemoveLobbyPlayer(ctx, rec.ID, playerID); err != nil {
+						slog.Error("Failed to remove expired lobby player", "error", err, "lobbyID", rec.ID, "playerID", playerID)
+					}
+					continue
+				}
+				if playerID == rec.HostID {
+					hostAlive = true
+				}
+			}
+			if !hostAlive {
+				if err := server.S.Redis.DeleteLobby(ctx, rec.ID, rec.GameID); err != nil {
+					slog.Error("Failed to delete stale lobby", "error", err, "lobbyID", rec.ID)
+				} else {
+					slog.Info("Deleted stale lobby", "lobbyID", rec.ID)
+				}
+			}
+		}
+	}
+
+	return nil
+}

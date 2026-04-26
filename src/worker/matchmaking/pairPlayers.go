@@ -117,7 +117,7 @@ func NotifyOnReady(ctx context.Context, playerID string, gameID string, resultCh
 	}()
 }
 
-func startMatch(ctx context.Context, gameID string, game *models.Game, players []string) error {
+func StartMatch(ctx context.Context, gameID string, game *models.Game, players []string) error {
 	slog.Info("Starting match", "gameID", gameID, "players", players)
 	// Create the k8s image containing the match
 	connInfo, err := server.S.Machines.CreateServer(ctx, &hetzner.MachineConfig{
@@ -196,7 +196,7 @@ func PairPlayers(ctx context.Context) error {
 				continue
 			}
 
-			if err := startMatch(ctx, gameID, game, players); err != nil {
+			if err := StartMatch(ctx, gameID, game, players); err != nil {
 				continue
 			}
 			playerPaired = true

@@ -34,6 +34,7 @@ type Game struct {
 
 	// TODO separate into leaderboard if needed
 	GuestsAllowed          bool   `json:"guests_allowed" gorm:"default:true"`
+	LobbyEnabled           bool   `json:"lobby_enabled" gorm:"default:true"`
 	LobbySize              int    `json:"lobby_size" gorm:"default:2"`
 	MatchmakingStrategy    string `json:"matchmaking_strategy" gorm:"not null;default:'random'"`
 	MatchmakingMachineName string `json:"matchmaking_machine_name" gorm:"not null"`
@@ -52,6 +53,7 @@ type GameResp struct {
 	Name                    string   `json:"name"`
 	Description             string   `json:"description"`
 	GuestsAllowed           bool     `json:"guests_allowed"`
+	LobbyEnabled            bool     `json:"lobby_enabled"`
 	LobbySize               int      `json:"lobby_size"`
 	MatchmakingStrategy     string   `json:"matchmaking_strategy"`
 	MatchmakingMachineName  string   `json:"matchmaking_machine_name"`
@@ -67,6 +69,7 @@ func (u *Game) ToResp() *GameResp {
 		Name:                    u.Name,
 		Description:             u.Description,
 		GuestsAllowed:           u.GuestsAllowed,
+		LobbyEnabled:            u.LobbyEnabled,
 		LobbySize:               u.LobbySize,
 		MatchmakingStrategy:     u.MatchmakingStrategy,
 		MatchmakingMachineName:  u.MatchmakingMachineName,
@@ -81,6 +84,7 @@ type CreateGameParams struct {
 	Description             string
 	GuestsAllowed           bool
 	PublicResults           bool
+	LobbyEnabled            *bool
 	LobbySize               int
 	MatchmakingStrategy     string
 	MatchmakingMachineName  string
@@ -108,6 +112,11 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		return nil, errors.New("invalid elo strategy: " + params.ELOStrategy + " must be one of " + strings.Join(ELO_STRATEGIES, ", "))
 	}
 
+	lobbyEnabled := true
+	if params.LobbyEnabled != nil {
+		lobbyEnabled = *params.LobbyEnabled
+	}
+
 	game := &Game{
 		OwnerID:                 owner.ID,
 		Owner:                   owner,
@@ -115,6 +124,7 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		Description:             params.Description,
 		GuestsAllowed:           params.GuestsAllowed,
 		PublicResults:           params.PublicResults,
+		LobbyEnabled:            lobbyEnabled,
 		LobbySize:               params.LobbySize,
 		MatchmakingStrategy:     params.MatchmakingStrategy,
 		MatchmakingMachineName:  params.MatchmakingMachineName,
@@ -163,6 +173,7 @@ type UpdateGameParams struct {
 	Name                    string  `json:"name"`
 	Description             string  `json:"description"`
 	GuestsAllowed           *bool   `json:"guests_allowed"`
+	LobbyEnabled            *bool   `json:"lobby_enabled"`
 	LobbySize               int     `json:"lobby_size"`
 	MatchmakingStrategy     string  `json:"matchmaking_strategy"`
 	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
@@ -197,6 +208,9 @@ func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
 	}
 	if params.GuestsAllowed != nil {
 		game.GuestsAllowed = *params.GuestsAllowed
+	}
+	if params.LobbyEnabled != nil {
+		game.LobbyEnabled = *params.LobbyEnabled
 	}
 	if params.LobbySize != 0 {
 		game.LobbySize = params.LobbySize

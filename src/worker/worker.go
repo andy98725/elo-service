@@ -51,6 +51,9 @@ func RunWorker(ctx context.Context, shutdown chan struct{}) {
 		if err := matchmaking.CleanupExpiredPlayers(ctx); err != nil {
 			slog.Error("Failed to cleanup expired players", "error", err)
 		}
+		if err := matchmaking.CleanupExpiredLobbies(ctx); err != nil {
+			slog.Error("Failed to cleanup expired lobbies", "error", err)
+		}
 	}
 
 	for {
