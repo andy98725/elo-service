@@ -57,6 +57,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/echo.HTTPError"
                         }
                     },
+                    "409": {
+                        "description": "game name already taken",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -218,6 +224,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/echo.HTTPError"
                         }
                     },
+                    "403": {
+                        "description": "caller is not the game owner",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -261,6 +273,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "403": {
+                        "description": "caller is not the game owner",
                         "schema": {
                             "$ref": "#/definitions/echo.HTTPError"
                         }
@@ -404,6 +422,131 @@ const docTemplate = `{
                 }
             }
         },
+        "/lobby/find": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns lobbies for the given game, optionally filtered to those whose Tags contain ALL the comma-separated tags in the query.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Lobby"
+                ],
+                "summary": "List open lobbies for a game",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Game UUID",
+                        "name": "gameID",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated tags; lobby must include every tag to be returned",
+                        "name": "tags",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "lobbies",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
+            }
+        },
+        "/lobby/host": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Upgrades to a WebSocket. Creates a new lobby for a game and keeps the host's connection open. The host owns chat, /disconnect \u003cname\u003e, and /start commands. Lobby is torn down when the host disconnects.",
+                "tags": [
+                    "Lobby"
+                ],
+                "summary": "Host a lobby (WebSocket)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Game UUID",
+                        "name": "gameID",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Comma-separated tags advertised to /lobby/find (max 16)",
+                        "name": "tags",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Opaque metadata stored on the lobby record",
+                        "name": "metadata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "JWT token (alternative to Authorization header)",
+                        "name": "token",
+                        "in": "query"
+                    }
+                ],
+                "responses": {}
+            }
+        },
+        "/lobby/join": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Upgrades to a WebSocket and joins an existing lobby. Capacity is enforced atomically; rejects with 'lobby is full' once the lobby's player count equals MaxPlayers. Receives lobby events (player_join, player_leave, player_say, lobby_starting) and the post-/start matchmaking handshake.",
+                "tags": [
+                    "Lobby"
+                ],
+                "summary": "Join a lobby (WebSocket)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Lobby UUID returned by /lobby/host or /lobby/find",
+                        "name": "lobbyID",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "JWT token (alternative to Authorization header)",
+                        "name": "token",
+                        "in": "query"
+                    }
+                ],
+                "responses": {}
+            }
+        },
         "/match/game/{gameID}": {
             "get": {
                 "security": [
@@ -485,6 +628,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Optional sub-queue key (only honored when game.metadata_enabled=true; capped at 4 KB)",
+                        "name": "metadata",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "JWT token (alternative to Authorization header)",
                         "name": "token",
                         "in": "query"
@@ -515,6 +664,12 @@ const docTemplate = `{
                         "name": "gameID",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sub-queue key (only honored when game.metadata_enabled=true)",
+                        "name": "metadata",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -938,6 +1093,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/echo.HTTPError"
                         }
                     },
+                    "409": {
+                        "description": "username or email already taken",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -1308,6 +1469,9 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "lobby_enabled": {
+                    "type": "boolean"
+                },
                 "lobby_size": {
                     "type": "integer"
                 },
@@ -1322,6 +1486,9 @@ const docTemplate = `{
                 },
                 "matchmaking_strategy": {
                     "type": "string"
+                },
+                "metadata_enabled": {
+                    "type": "boolean"
                 },
                 "name": {
                     "type": "string"
@@ -1404,6 +1571,9 @@ const docTemplate = `{
                 "guests_allowed": {
                     "type": "boolean"
                 },
+                "lobby_enabled": {
+                    "type": "boolean"
+                },
                 "lobby_size": {
                     "type": "integer"
                 },
@@ -1418,6 +1588,9 @@ const docTemplate = `{
                 },
                 "matchmaking_strategy": {
                     "type": "string"
+                },
+                "metadata_enabled": {
+                    "type": "boolean"
                 },
                 "name": {
                     "type": "string"
@@ -1459,6 +1632,9 @@ const docTemplate = `{
                 "guests_allowed": {
                     "type": "boolean"
                 },
+                "lobby_enabled": {
+                    "type": "boolean"
+                },
                 "lobby_size": {
                     "type": "integer"
                 },
@@ -1473,6 +1649,9 @@ const docTemplate = `{
                 },
                 "matchmaking_strategy": {
                     "type": "string"
+                },
+                "metadata_enabled": {
+                    "type": "boolean"
                 },
                 "name": {
                     "type": "string"

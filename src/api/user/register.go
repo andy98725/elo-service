@@ -33,6 +33,7 @@ type RegisterRequest struct {
 // @Param        body body RegisterRequest true "Registration payload"
 // @Success      200 {object} models.UserResp
 // @Failure      400 {object} echo.HTTPError
+// @Failure      409 {object} echo.HTTPError "username or email already taken"
 // @Failure      500 {object} echo.HTTPError
 // @Router       /user [post]
 func Register(ctx echo.Context) error {

@@ -48,6 +48,7 @@ type CreateGameRequest struct {
 // @Param        body body CreateGameRequest true "Game creation payload"
 // @Success      200 {object} models.GameResp
 // @Failure      400 {object} echo.HTTPError
+// @Failure      409 {object} echo.HTTPError "game name already taken"
 // @Failure      500 {object} echo.HTTPError
 // @Router       /game [post]
 func CreateGame(ctx echo.Context) error {
@@ -202,6 +203,7 @@ func GetGamesOfUser(ctx echo.Context) error {
 // @Param        body body models.UpdateGameParams  true "Fields to update"
 // @Success      200 {object} models.GameResp
 // @Failure      400 {object} echo.HTTPError
+// @Failure      403 {object} echo.HTTPError "caller is not the game owner"
 // @Failure      500 {object} echo.HTTPError
 // @Router       /game/{id} [put]
 func UpdateGame(ctx echo.Context) error {
@@ -236,6 +238,7 @@ func UpdateGame(ctx echo.Context) error {
 // @Param        id path string true "Game UUID"
 // @Success      200 {object} map[string]string "message"
 // @Failure      400 {object} echo.HTTPError
+// @Failure      403 {object} echo.HTTPError "caller is not the game owner"
 // @Failure      500 {object} echo.HTTPError
 // @Router       /game/{id} [delete]
 func DeleteGame(ctx echo.Context) error {

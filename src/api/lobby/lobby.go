@@ -25,7 +25,16 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// HostLobby creates a new lobby and keeps the host's WebSocket open.
+// HostLobby godoc
+// @Summary      Host a lobby (WebSocket)
+// @Description  Upgrades to a WebSocket. Creates a new lobby for a game and keeps the host's connection open. The host owns chat, /disconnect <name>, and /start commands. Lobby is torn down when the host disconnects.
+// @Tags         Lobby
+// @Security     BearerAuth
+// @Param        gameID   query string true  "Game UUID"
+// @Param        tags     query string false "Comma-separated tags advertised to /lobby/find (max 16)"
+// @Param        metadata query string false "Opaque metadata stored on the lobby record"
+// @Param        token    query string false "JWT token (alternative to Authorization header)"
+// @Router       /lobby/host [get]
 func HostLobby(ctx echo.Context) error {
 	conn, err := upgrader.Upgrade(ctx.Response(), ctx.Request(), nil)
 	if err != nil {
@@ -94,7 +103,14 @@ func HostLobby(ctx echo.Context) error {
 	return nil
 }
 
-// JoinLobby attaches a player to an existing lobby.
+// JoinLobby godoc
+// @Summary      Join a lobby (WebSocket)
+// @Description  Upgrades to a WebSocket and joins an existing lobby. Capacity is enforced atomically; rejects with 'lobby is full' once the lobby's player count equals MaxPlayers. Receives lobby events (player_join, player_leave, player_say, lobby_starting) and the post-/start matchmaking handshake.
+// @Tags         Lobby
+// @Security     BearerAuth
+// @Param        lobbyID query string true  "Lobby UUID returned by /lobby/host or /lobby/find"
+// @Param        token   query string false "JWT token (alternative to Authorization header)"
+// @Router       /lobby/join [get]
 func JoinLobby(ctx echo.Context) error {
 	conn, err := upgrader.Upgrade(ctx.Response(), ctx.Request(), nil)
 	if err != nil {
