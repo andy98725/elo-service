@@ -30,8 +30,12 @@ type MockMachineService struct {
 
 	// CreateFn / DeleteFn let individual tests override behavior (e.g. to
 	// inject errors). Nil = use the default in-memory implementation.
-	CreateFn func(ctx context.Context, serverType string, agentPort int64) (*hetzner.HostConnectionInfo, error)
+	CreateFn func(ctx context.Context, serverType string, agentPort int64, tls *hetzner.HostTLSOpts) (*hetzner.HostConnectionInfo, error)
 	DeleteFn func(ctx context.Context, providerID string) error
+	// LastTLSOpts is the TLS opts the last CreateHost call received.
+	// Tests use it to assert wildcard-TLS plumbing (or to confirm absence
+	// when the feature is off, in which case it stays nil).
+	LastTLSOpts *hetzner.HostTLSOpts
 
 	agentServer *http.Server
 	agentPort   int
@@ -120,9 +124,13 @@ func (m *MockMachineService) ValidateServerType(ctx context.Context, serverType 
 	return nil
 }
 
-func (m *MockMachineService) CreateHost(ctx context.Context, serverType string, agentPort int64) (*hetzner.HostConnectionInfo, error) {
+func (m *MockMachineService) CreateHost(ctx context.Context, serverType string, agentPort int64, tls *hetzner.HostTLSOpts) (*hetzner.HostConnectionInfo, error) {
+	m.mu.Lock()
+	m.LastTLSOpts = tls
+	m.mu.Unlock()
+
 	if m.CreateFn != nil {
-		return m.CreateFn(ctx, serverType, agentPort)
+		return m.CreateFn(ctx, serverType, agentPort, tls)
 	}
 
 	id := m.nextHost.Add(1)
@@ -205,4 +213,24 @@ func (s *MockStorageService) GetLogs(ctx context.Context, key string) (io.ReadCl
 		return nil, fmt.Errorf("key not found: %s", key)
 	}
 	return io.NopCloser(bytes.NewReader(data)), nil
+}
+
+// PutObject and GetObject satisfy the generic blob surface used by the cert
+// manager. Tests don't enable wildcard TLS, so these are unused in practice;
+// they're present to satisfy the StorageService interface.
+func (s *MockStorageService) PutObject(ctx context.Context, key string, body []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.objects[key] = append([]byte(nil), body...)
+	return nil
+}
+
+func (s *MockStorageService) GetObject(ctx context.Context, key string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, ok := s.objects[key]
+	if !ok {
+		return nil, fmt.Errorf("key not found: %s", key)
+	}
+	return append([]byte(nil), data...), nil
 }

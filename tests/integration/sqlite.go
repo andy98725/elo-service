@@ -68,6 +68,8 @@ func migrateForSQLite(db *gorm.DB) error {
 			status TEXT NOT NULL DEFAULT 'provisioning',
 			max_slots INTEGER NOT NULL,
 			allocated_ports TEXT NOT NULL DEFAULT '{}',
+			public_hostname TEXT,
+			dns_record_id TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,

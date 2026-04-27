@@ -25,8 +25,42 @@ type MachineHost struct {
 	Status         string        `json:"status" gorm:"not null;default:'provisioning'"`
 	MaxSlots       int           `json:"max_slots" gorm:"not null"`
 	AllocatedPorts pq.Int64Array `json:"-" gorm:"type:bigint[];not null;default:'{}'"`
-	CreatedAt      time.Time     `json:"created_at"`
-	UpdatedAt      time.Time     `json:"updated_at"`
+	// PublicHostname is "host-<MachineHost.ID>.<GameServerDomain>" — the
+	// FQDN that resolves to PublicIP via Cloudflare. Populated by the
+	// matchmaker on provisioning when the wildcard-TLS feature is enabled,
+	// empty otherwise. Caddy on the host serves the wildcard cert against
+	// any hostname under the wildcard, so this value is purely a routing
+	// hint for clients.
+	PublicHostname string `json:"public_hostname,omitempty" gorm:""`
+	// DNSRecordID is the Cloudflare-assigned ID of the A record this host
+	// owns. Stored so teardown can delete it without an extra lookup.
+	// Empty when wildcard-TLS is disabled.
+	DNSRecordID string    `json:"-" gorm:""`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// PublicAddress returns the hostname clients should connect to. When the
+// wildcard-TLS feature is on and the host has a DNS record, prefer the
+// hostname (so WebGL clients can wss:// to it). Otherwise fall back to
+// the raw IP.
+func (h *MachineHost) PublicAddress() string {
+	if h.PublicHostname != "" {
+		return h.PublicHostname
+	}
+	return h.PublicIP
+}
+
+// SetMachineHostHostname records the per-host DNS hostname + Cloudflare
+// record ID after the matchmaker creates the A record. Called once per
+// host, only when the wildcard-TLS feature is enabled.
+func SetMachineHostHostname(hostID, hostname, recordID string) error {
+	return server.S.DB.Model(&MachineHost{}).
+		Where("id = ?", hostID).
+		Updates(map[string]interface{}{
+			"public_hostname": hostname,
+			"dns_record_id":   recordID,
+		}).Error
 }
 
 func CreateMachineHost(providerID, publicIP, agentToken string, agentPort int64, maxSlots int) (*MachineHost, error) {

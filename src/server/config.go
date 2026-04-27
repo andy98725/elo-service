@@ -31,6 +31,17 @@ type Config struct {
 	AWSSecretAccessKey            string
 	AWSRegion                     string
 	AWSBucketName                 string
+
+	// Wildcard-TLS feature: when all three are set, the matchmaker maintains
+	// a single *.${GameServerDomain} cert via Let's Encrypt DNS-01, creates
+	// per-host A records on host provisioning, and tells clients to connect
+	// via the hostname (so WebGL builds can use wss://). Leave any empty to
+	// disable; clients fall back to ip:port and no DNS records are created.
+	GameServerDomain    string // e.g. "gs.elomm.net" — wildcard cert covers *.<this>
+	CloudflareAPIToken  string
+	CloudflareZoneID    string
+	CertEmail           string        // ACME registration contact (default admin@<GameServerDomain>)
+	CertRenewalInterval time.Duration // worker tick interval; default 12h
 }
 
 func InitConfig() (*Config, error) {
@@ -147,5 +158,36 @@ func InitConfig() (*Config, error) {
 		return nil, fmt.Errorf("AWS_BUCKET_NAME is not set")
 	}
 
+	// Wildcard-TLS optional config. All-or-nothing: if any of the three is
+	// set, the other two must be set too — otherwise we'd have inconsistent
+	// state (DNS records being created with no cert, or vice versa).
+	cfg.GameServerDomain = os.Getenv("GAME_SERVER_DOMAIN")
+	cfg.CloudflareAPIToken = os.Getenv("CLOUDFLARE_API_TOKEN")
+	cfg.CloudflareZoneID = os.Getenv("CLOUDFLARE_ZONE_ID")
+	wildcardCount := 0
+	for _, v := range []string{cfg.GameServerDomain, cfg.CloudflareAPIToken, cfg.CloudflareZoneID} {
+		if v != "" {
+			wildcardCount++
+		}
+	}
+	if wildcardCount != 0 && wildcardCount != 3 {
+		return nil, fmt.Errorf("wildcard-TLS config is partial: GAME_SERVER_DOMAIN, CLOUDFLARE_API_TOKEN, and CLOUDFLARE_ZONE_ID must all be set together (got %d/3)", wildcardCount)
+	}
+	if cfg.CertEmail = os.Getenv("CERT_EMAIL"); cfg.CertEmail == "" && cfg.GameServerDomain != "" {
+		cfg.CertEmail = "admin@" + cfg.GameServerDomain
+	}
+	if cri, err := time.ParseDuration(os.Getenv("CERT_RENEWAL_INTERVAL")); err == nil && cri > 0 {
+		cfg.CertRenewalInterval = cri
+	} else {
+		cfg.CertRenewalInterval = 12 * time.Hour
+	}
+
 	return cfg, nil
+}
+
+// WildcardTLSEnabled reports whether all three required env vars are set.
+// Callers branch on this to skip cert/DNS work when running locally or in
+// tests without the production secrets.
+func (c *Config) WildcardTLSEnabled() bool {
+	return c.GameServerDomain != "" && c.CloudflareAPIToken != "" && c.CloudflareZoneID != ""
 }

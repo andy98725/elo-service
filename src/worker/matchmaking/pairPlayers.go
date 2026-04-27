@@ -162,7 +162,13 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 		}
 
 		slog.Info("No available host; provisioning new one")
-		connInfo, err := server.S.Machines.CreateHost(ctx, cfg.HCLOUDHostType, cfg.HCLOUDAgentPort)
+		tlsOpts, err := buildHostTLSOpts()
+		if err != nil {
+			slog.Error("Failed to read wildcard cert; aborting host provision", "error", err)
+			notifyError(ctx, gameID, players, "wildcard cert unavailable")
+			return err
+		}
+		connInfo, err := server.S.Machines.CreateHost(ctx, cfg.HCLOUDHostType, cfg.HCLOUDAgentPort, tlsOpts)
 		if err != nil {
 			slog.Error("Failed to provision host VM", "error", err)
 			notifyError(ctx, gameID, players, "failed to provision server host")
@@ -183,6 +189,11 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 		if err := models.SetMachineHostReady(host.ID); err != nil {
 			slog.Error("Failed to mark host ready", "error", err)
 		}
+
+		// Best-effort DNS record so wildcard-TLS clients can reach this host
+		// by hostname. Failure here is logged but doesn't abort — the host
+		// still works for IP-based clients.
+		provisionDNSForHost(ctx, host, connInfo.PublicIP)
 	}
 
 	// Allocate host ports for this container.

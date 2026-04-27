@@ -95,7 +95,7 @@ func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reas
 			slog.Error("Failed to mark server instance deleted", "error", err, "instanceID", si.ID)
 		}
 
-		go tryDeleteIdleHost(si.MachineHostID, si.MachineHost.ProviderID)
+		go tryDeleteIdleHost(&si.MachineHost)
 	} else {
 		if _, err := models.MatchEnded(match.ID, winnerIDs, reason, ""); err != nil {
 			slog.Error("Failed to record match result", "error", err, "matchID", match.ID)
@@ -109,11 +109,12 @@ func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reas
 	return status, nil
 }
 
-// tryDeleteIdleHost deletes the host VM if it has no remaining active instances
-// and removing it would not drop available slots below the warm pool target.
-// Runs in a goroutine so it never blocks the match-end response.
-func tryDeleteIdleHost(hostID, providerID string) {
-	count, err := models.CountActiveInstancesOnHost(hostID)
+// tryDeleteIdleHost deletes the host VM if it has no remaining active
+// instances and removing it would not drop available slots below the warm
+// pool target. Runs in a goroutine so it never blocks the match-end
+// response.
+func tryDeleteIdleHost(host *models.MachineHost) {
+	count, err := models.CountActiveInstancesOnHost(host.ID)
 	if err != nil || count > 0 {
 		return
 	}
@@ -121,30 +122,35 @@ func tryDeleteIdleHost(hostID, providerID string) {
 	if warmSlots := server.S.Config.HCLOUDWarmSlots; warmSlots > 0 {
 		available, err := models.CountAvailableSlots()
 		if err != nil {
-			slog.Error("Failed to count available slots; skipping host deletion", "error", err, "hostID", hostID)
+			slog.Error("Failed to count available slots; skipping host deletion", "error", err, "hostID", host.ID)
 			return
 		}
-		host, err := models.GetMachineHost(hostID)
-		if err != nil {
-			slog.Error("Failed to load host; skipping host deletion", "error", err, "hostID", hostID)
-			return
-		}
-		// available already includes this host's slots; check if we can afford to lose them
+		// available already includes this host's slots; check if we can
+		// afford to lose them
 		if available-int64(host.MaxSlots) < int64(warmSlots) {
-			slog.Info("Keeping idle host to maintain warm pool", "hostID", hostID,
+			slog.Info("Keeping idle host to maintain warm pool", "hostID", host.ID,
 				"available", available, "warmSlots", warmSlots)
 			return
 		}
 	}
 
-	if err := models.SetMachineHostDeleted(hostID); err != nil {
-		slog.Error("Failed to mark host deleted in DB", "error", err, "hostID", hostID)
+	if err := models.SetMachineHostDeleted(host.ID); err != nil {
+		slog.Error("Failed to mark host deleted in DB", "error", err, "hostID", host.ID)
 		return
 	}
 
-	if err := server.S.Machines.DeleteHost(context.Background(), providerID); err != nil {
-		slog.Error("Failed to delete idle host VM", "error", err, "providerID", providerID)
+	// Best-effort DNS cleanup before the VM goes away. A stale record
+	// outlives its 60s TTL anyway, so this isn't fatal.
+	if server.S.DNS != nil && host.DNSRecordID != "" {
+		if err := server.S.DNS.DeleteARecord(context.Background(), host.DNSRecordID); err != nil {
+			slog.Warn("Failed to delete DNS record (will leak until TTL)",
+				"error", err, "hostID", host.ID, "recordID", host.DNSRecordID)
+		}
+	}
+
+	if err := server.S.Machines.DeleteHost(context.Background(), host.ProviderID); err != nil {
+		slog.Error("Failed to delete idle host VM", "error", err, "providerID", host.ProviderID)
 	} else {
-		slog.Info("Deleted idle host VM", "providerID", providerID)
+		slog.Info("Deleted idle host VM", "providerID", host.ProviderID)
 	}
 }

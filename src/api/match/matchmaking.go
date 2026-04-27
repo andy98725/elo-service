@@ -110,8 +110,10 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 				return nil
 			}
 			conn.WriteJSON(echo.Map{
-				"status":       "match_found",
-				"server_host":  match.ServerInstance.MachineHost.PublicIP,
+				"status": "match_found",
+				// Prefer hostname when wildcard TLS is on so WebGL clients
+				// can wss:// to it; falls back to IP otherwise.
+				"server_host":  match.ServerInstance.MachineHost.PublicAddress(),
 				"server_ports": []int64(match.ServerInstance.HostPorts),
 				"match_id":     match.ID,
 			})

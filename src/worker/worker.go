@@ -64,6 +64,16 @@ func RunWorker(ctx context.Context, shutdown chan struct{}) {
 		}
 	}
 
+	// Cert renewal tick. Only fires when the wildcard-TLS subsystem is
+	// wired up (server.S.Cert is non-nil). EnsureFresh is a no-op when the
+	// current cert isn't near expiry, so the coarse interval is fine.
+	var certTickCh <-chan time.Time
+	if server.S.Cert != nil {
+		t := time.NewTicker(server.S.Config.CertRenewalInterval)
+		defer t.Stop()
+		certTickCh = t.C
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -74,6 +84,10 @@ func RunWorker(ctx context.Context, shutdown chan struct{}) {
 			runPairing()
 		case <-gcCh:
 			runGC()
+		case <-certTickCh:
+			if err := server.S.Cert.EnsureFresh(ctx); err != nil {
+				slog.Error("Failed to refresh wildcard cert", "error", err)
+			}
 		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
@@ -18,6 +19,14 @@ import (
 
 var dockerClient *client.Client
 var agentToken string
+
+// internalPortShift is added to every public host port when binding the
+// game container's docker port. On wildcard-TLS hosts, Caddy listens on
+// the public ports and reverse-proxies to localhost:port+shift, which is
+// where the container is actually bound. Set via INTERNAL_PORT_SHIFT env.
+// Defaults to 0 (no shift, legacy direct bind) so older host VMs keep
+// working without changes.
+var internalPortShift int64
 
 type startContainerRequest struct {
 	Image     string   `json:"image"`
@@ -35,6 +44,15 @@ func main() {
 	agentToken = os.Getenv("AGENT_TOKEN")
 	if agentToken == "" {
 		log.Fatal("AGENT_TOKEN is not set")
+	}
+
+	if v := os.Getenv("INTERNAL_PORT_SHIFT"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			log.Fatalf("INTERNAL_PORT_SHIFT must be an integer, got %q: %v", v, err)
+		}
+		internalPortShift = n
+		log.Printf("INTERNAL_PORT_SHIFT=%d (TLS-enabled host)", internalPortShift)
 	}
 
 	port := os.Getenv("PORT")
@@ -106,11 +124,21 @@ func handleStartContainer(w http.ResponseWriter, r *http.Request) {
 	portBindings := nat.PortMap{}
 	exposedPorts := nat.PortSet{}
 	for i, gamePort := range req.GamePorts {
-		for _, proto := range []string{"tcp", "udp"} {
-			p := nat.Port(fmt.Sprintf("%d/%s", gamePort, proto))
-			exposedPorts[p] = struct{}{}
-			portBindings[p] = []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", req.HostPorts[i])}}
-		}
+		// On TLS-enabled hosts (internalPortShift != 0), Caddy listens on
+		// the public TCP port and reverse-proxies to localhost:port+shift,
+		// where the container is actually bound. UDP can't be TLS-wrapped
+		// (Caddy doesn't speak it, browsers can't either) so UDP stays
+		// bound directly on the public port for native clients.
+		publicPort := req.HostPorts[i]
+		tcpBindPort := publicPort + internalPortShift
+		// TCP: shifted (so Caddy can listen on publicPort)
+		tcpKey := nat.Port(fmt.Sprintf("%d/tcp", gamePort))
+		exposedPorts[tcpKey] = struct{}{}
+		portBindings[tcpKey] = []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", tcpBindPort)}}
+		// UDP: direct
+		udpKey := nat.Port(fmt.Sprintf("%d/udp", gamePort))
+		exposedPorts[udpKey] = struct{}{}
+		portBindings[udpKey] = []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", publicPort)}}
 	}
 
 	cmd := []string{"-token", req.Token}
