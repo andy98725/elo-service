@@ -19,6 +19,18 @@ type ReportResultsRequest struct {
 	Reason    string   `json:"reason"`
 }
 
+// ReportResults godoc
+// @Summary      Report match results
+// @Description  Called by the game server to report the outcome of a match
+// @Tags         Results
+// @Accept       json
+// @Produce      json
+// @Param        body body ReportResultsRequest true "Match result payload"
+// @Success      200 {object} map[string]string "message"
+// @Failure      400 {object} echo.HTTPError
+// @Failure      404 {object} echo.HTTPError
+// @Failure      500 {object} echo.HTTPError
+// @Router       /result/report [post]
 func ReportResults(c echo.Context) error {
 	req := new(ReportResultsRequest)
 	if err := c.Bind(req); err != nil {

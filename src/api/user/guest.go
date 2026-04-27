@@ -1,7 +1,6 @@
 package user
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/andy98725/elo-service/src/api/auth"
@@ -12,6 +11,17 @@ type GuestRequest struct {
 	DisplayName string `json:"displayName"`
 }
 
+// GuestToken godoc
+// @Summary      Create a guest session
+// @Description  Returns a JWT token for a guest user with the given display name
+// @Tags         Auth
+// @Accept       json
+// @Produce      json
+// @Param        body body GuestRequest true "Guest login payload"
+// @Success      200 {object} map[string]string "token, displayName, id"
+// @Failure      400 {object} echo.HTTPError
+// @Failure      401 {object} echo.HTTPError
+// @Router       /guest/login [post]
 func GuestToken(ctx echo.Context) error {
 	req := new(GuestRequest)
 	if err := ctx.Bind(req); err != nil {
@@ -19,7 +29,7 @@ func GuestToken(ctx echo.Context) error {
 	}
 
 	if req.DisplayName == "" {
-		return errors.New("missing required fields")
+		return echo.NewHTTPError(http.StatusBadRequest, "displayName is required")
 	}
 	token, claims, err := auth.GuestLogin(req.DisplayName)
 	if err != nil {

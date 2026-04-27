@@ -24,6 +24,18 @@ func saveMatchLogs(ctx context.Context, si *models.ServerInstance) (string, erro
 	return server.S.AWS.UploadLogs(ctx, logs)
 }
 
+// GetMatchLogs godoc
+// @Summary      Get match logs
+// @Description  Returns the logs for a completed match. Access depends on game settings and user role.
+// @Tags         Results
+// @Produce      text/plain
+// @Security     BearerAuth
+// @Param        matchID path string true "Match result UUID"
+// @Success      200 {string} string "Match logs"
+// @Failure      403 {object} echo.HTTPError
+// @Failure      404 {object} echo.HTTPError
+// @Failure      500 {object} echo.HTTPError
+// @Router       /results/{matchID}/logs [get]
 func GetMatchLogs(ctx echo.Context) error {
 	matchID := ctx.Param("matchID")
 	id, ok := ctx.Get("id").(string)

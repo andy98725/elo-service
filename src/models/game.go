@@ -18,6 +18,10 @@ const (
 )
 
 var MATCHMAKING_STRATEGIES = []string{MATCHMAKING_STRATEGY_RANDOM, MATCHMAKING_STRATEGY_RATING}
+
+// ErrNotGameOwner is returned by mutation operations when the caller is not
+// the owner of the target game. Handlers should map this to HTTP 403.
+var ErrNotGameOwner = errors.New("not the owner of this game")
 var ELO_STRATEGIES = []string{ELO_STRATEGY_UNRANKED, ELO_STRATEGY_CLASSIC}
 
 type Game struct {
@@ -30,6 +34,7 @@ type Game struct {
 
 	// TODO separate into leaderboard if needed
 	GuestsAllowed          bool   `json:"guests_allowed" gorm:"default:true"`
+	LobbyEnabled           bool   `json:"lobby_enabled" gorm:"default:true"`
 	LobbySize              int    `json:"lobby_size" gorm:"default:2"`
 	MatchmakingStrategy    string `json:"matchmaking_strategy" gorm:"not null;default:'random'"`
 	MatchmakingMachineName string `json:"matchmaking_machine_name" gorm:"not null"`
@@ -39,6 +44,7 @@ type Game struct {
 	DefaultRating           int           `json:"default_rating" gorm:"default:1000"`
 	PublicResults           bool          `json:"public_results" gorm:"default:true"`
 	PublicMatchLogs         bool          `json:"public_match_logs" gorm:"default:true"`
+	MetadataEnabled         bool          `json:"metadata_enabled" gorm:"default:false"`
 }
 
 type GameResp struct {
@@ -47,11 +53,13 @@ type GameResp struct {
 	Name                    string   `json:"name"`
 	Description             string   `json:"description"`
 	GuestsAllowed           bool     `json:"guests_allowed"`
+	LobbyEnabled            bool     `json:"lobby_enabled"`
 	LobbySize               int      `json:"lobby_size"`
 	MatchmakingStrategy     string   `json:"matchmaking_strategy"`
 	MatchmakingMachineName  string   `json:"matchmaking_machine_name"`
 	MatchmakingMachinePorts []int64  `json:"matchmaking_machine_ports"`
 	ELOStrategy             string   `json:"elo_strategy"`
+	MetadataEnabled         bool     `json:"metadata_enabled"`
 }
 
 func (u *Game) ToResp() *GameResp {
@@ -61,11 +69,13 @@ func (u *Game) ToResp() *GameResp {
 		Name:                    u.Name,
 		Description:             u.Description,
 		GuestsAllowed:           u.GuestsAllowed,
+		LobbyEnabled:            u.LobbyEnabled,
 		LobbySize:               u.LobbySize,
 		MatchmakingStrategy:     u.MatchmakingStrategy,
 		MatchmakingMachineName:  u.MatchmakingMachineName,
 		MatchmakingMachinePorts: []int64(u.MatchmakingMachinePorts),
 		ELOStrategy:             u.ELOStrategy,
+		MetadataEnabled:         u.MetadataEnabled,
 	}
 }
 
@@ -74,6 +84,7 @@ type CreateGameParams struct {
 	Description             string
 	GuestsAllowed           bool
 	PublicResults           bool
+	LobbyEnabled            *bool
 	LobbySize               int
 	MatchmakingStrategy     string
 	MatchmakingMachineName  string
@@ -81,6 +92,7 @@ type CreateGameParams struct {
 	ELOStrategy             string
 	PublicMatchResults      bool
 	PublicMatchLogs         bool
+	MetadataEnabled         bool
 }
 
 func CreateGame(params CreateGameParams, owner User) (*Game, error) {
@@ -100,6 +112,11 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		return nil, errors.New("invalid elo strategy: " + params.ELOStrategy + " must be one of " + strings.Join(ELO_STRATEGIES, ", "))
 	}
 
+	lobbyEnabled := true
+	if params.LobbyEnabled != nil {
+		lobbyEnabled = *params.LobbyEnabled
+	}
+
 	game := &Game{
 		OwnerID:                 owner.ID,
 		Owner:                   owner,
@@ -107,12 +124,14 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		Description:             params.Description,
 		GuestsAllowed:           params.GuestsAllowed,
 		PublicResults:           params.PublicResults,
+		LobbyEnabled:            lobbyEnabled,
 		LobbySize:               params.LobbySize,
 		MatchmakingStrategy:     params.MatchmakingStrategy,
 		MatchmakingMachineName:  params.MatchmakingMachineName,
 		MatchmakingMachinePorts: pq.Int64Array(params.MatchmakingMachinePorts),
 		ELOStrategy:             params.ELOStrategy,
 		PublicMatchLogs:         params.PublicMatchLogs,
+		MetadataEnabled:         params.MetadataEnabled,
 	}
 
 	result := server.S.DB.Create(game)
@@ -154,6 +173,7 @@ type UpdateGameParams struct {
 	Name                    string  `json:"name"`
 	Description             string  `json:"description"`
 	GuestsAllowed           *bool   `json:"guests_allowed"`
+	LobbyEnabled            *bool   `json:"lobby_enabled"`
 	LobbySize               int     `json:"lobby_size"`
 	MatchmakingStrategy     string  `json:"matchmaking_strategy"`
 	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
@@ -161,6 +181,7 @@ type UpdateGameParams struct {
 	ELOStrategy             string  `json:"elo_strategy"`
 	PublicResults           *bool   `json:"public_match_results"`
 	PublicMatchLogs         *bool   `json:"public_match_logs"`
+	MetadataEnabled         *bool   `json:"metadata_enabled"`
 }
 
 func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
@@ -176,7 +197,7 @@ func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
 		return nil, err
 	}
 	if game.OwnerID != owner.ID {
-		return nil, errors.New("you are not the owner of this game")
+		return nil, ErrNotGameOwner
 	}
 
 	if params.Name != "" {
@@ -187,6 +208,9 @@ func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
 	}
 	if params.GuestsAllowed != nil {
 		game.GuestsAllowed = *params.GuestsAllowed
+	}
+	if params.LobbyEnabled != nil {
+		game.LobbyEnabled = *params.LobbyEnabled
 	}
 	if params.LobbySize != 0 {
 		game.LobbySize = params.LobbySize
@@ -208,6 +232,9 @@ func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
 	}
 	if params.PublicMatchLogs != nil {
 		game.PublicMatchLogs = *params.PublicMatchLogs
+	}
+	if params.MetadataEnabled != nil {
+		game.MetadataEnabled = *params.MetadataEnabled
 	}
 
 	result := server.S.DB.Save(game)
@@ -233,7 +260,7 @@ func DeleteGame(id string, owner User) error {
 		return err
 	}
 	if game.OwnerID != owner.ID {
-		return errors.New("you are not the owner of this game")
+		return ErrNotGameOwner
 	}
 
 	result := server.S.DB.Delete(game)

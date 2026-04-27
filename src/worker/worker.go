@@ -59,6 +59,9 @@ func RunWorker(ctx context.Context, shutdown chan struct{}) {
 		if err := matchmaking.MaintainWarmPool(ctx); err != nil {
 			slog.Error("Failed to maintain warm pool", "error", err)
 		}
+		if err := matchmaking.CleanupExpiredLobbies(ctx); err != nil {
+			slog.Error("Failed to cleanup expired lobbies", "error", err)
+		}
 	}
 
 	for {

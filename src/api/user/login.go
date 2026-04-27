@@ -13,6 +13,17 @@ type LoginRequest struct {
 	Password    string `json:"password"`
 }
 
+// Login godoc
+// @Summary      Log in a user
+// @Description  Authenticates a user with email and password, returns a JWT token
+// @Tags         Auth
+// @Accept       json
+// @Produce      json
+// @Param        body body LoginRequest true "Login payload"
+// @Success      200 {object} map[string]string "token, displayName, id"
+// @Failure      400 {object} echo.HTTPError
+// @Failure      401 {object} echo.HTTPError
+// @Router       /user/login [post]
 func Login(c echo.Context) error {
 	req := new(LoginRequest)
 	if err := c.Bind(req); err != nil {
