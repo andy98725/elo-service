@@ -63,6 +63,10 @@ func TestHostCloudConfig_TLS(t *testing.T) {
 		// Caddyfile uses newline-separated directives within a site block;
 		// the inline ; form Caddy doesn't accept tripped a previous deploy.
 		`tls /etc/caddy/cert.pem /etc/caddy/key.pem`,
+		// Caddy must skip the agent port (8080 here) — agent already
+		// binds it, so a Caddy listener on the same port crashes startup
+		// with "address already in use".
+		`if [ "$p" -eq 8080 ]`,
 		// Agent gets the shift via env so its docker port-bindings line up.
 		"-e INTERNAL_PORT_SHIFT=10000",
 		"-e AGENT_TOKEN=tok-abc",
