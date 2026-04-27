@@ -58,7 +58,11 @@ func TestHostCloudConfig_TLS(t *testing.T) {
 		// Stanza generation loop. We assert the literal pieces — actual
 		// stanza generation happens at boot, not in this template.
 		"for p in $(seq 7000 9000)",
-		"localhost:$((p+10000))",
+		`"$((p+10000))"`, // shifted host port passed as printf arg
+		`reverse_proxy localhost:%s`,
+		// Caddyfile uses newline-separated directives within a site block;
+		// the inline ; form Caddy doesn't accept tripped a previous deploy.
+		`tls /etc/caddy/cert.pem /etc/caddy/key.pem`,
 		// Agent gets the shift via env so its docker port-bindings line up.
 		"-e INTERNAL_PORT_SHIFT=10000",
 		"-e AGENT_TOKEN=tok-abc",
