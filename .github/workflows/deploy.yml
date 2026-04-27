@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - production # TODO: Separate deployment
+      - production
   pull_request:
 
 jobs:
@@ -25,7 +25,10 @@ jobs:
 
   deploy:
     needs: test
-    if: github.event_name == 'push'
+    # Only the production branch deploys to Fly. Pushes to main run tests
+    # but skip deploy. This keeps main as a "ready to ship" line and gives
+    # production an explicit gate before traffic moves.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
