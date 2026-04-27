@@ -1,0 +1,137 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Overview
+
+`elo-service` is a Go matchmaking service backed by Postgres (persistent: users, games, ratings, match records) and Redis (transient: queue, pubsub triggers, per-player TTLs). The hosted instance lives on **fly.io** (app: `elo-service`), Postgres on **Neon**, Redis on **Upstash**, and game-server VMs on **Hetzner Cloud**.
+
+There is currently only a staging environment. The `production` branch is the deploy line: pushes to `production` build and ship via Fly. Pushes to `main` and PRs run tests but do **not** deploy. The model is "main is ready-to-ship; production is the explicit release gate."
+
+## Repository layout
+
+This repo is **four Go modules**, not one:
+
+- [`src/`](src/) — the elo-matchmaking service (root [`go.mod`](go.mod), module `github.com/andy98725/elo-service`). Entrypoint [`src/main.go`](src/main.go).
+- [`game-server-host-agent/`](game-server-host-agent/) — HTTP agent that runs on each Hetzner host VM. The matchmaker calls it to start/stop game-server Docker containers on that host. Own [`go.mod`](game-server-host-agent/go.mod).
+- [`game-server-sidecar/`](game-server-sidecar/) — minimal HTTP server that tails `/logs/server.log`. Runs alongside game containers so the matchmaker can pull match logs. Own [`go.mod`](game-server-sidecar/go.mod).
+- [`example-game-server/`](example-game-server/) — reference game-server impl (Docker image `andy98725/example-server:latest`) used by e2e tests. Own [`go.mod`](example-game-server/go.mod).
+
+## Architecture
+
+### Host-pool model
+
+The matchmaker provisions long-lived Hetzner VMs ("hosts") that each run multiple game-server containers. A new match either lands on an existing host with free capacity or triggers a fresh host provision (capped by `HCLOUD_MAX_HOSTS` × `HCLOUD_MAX_SLOTS_PER_HOST`). Two models persist this:
+
+- [`MachineHost`](src/models/machine_host.go) — one row per Hetzner VM. Tracks public IP, the agent token, allocated host ports, status.
+- [`ServerInstance`](src/models/server_instance.go) — one row per game container. References its `MachineHost`, the agent-issued container ID, the game and host port pairs, and a per-match `auth_code`.
+
+A `Match` references a `ServerInstance`, which references a `MachineHost`. `match.ConnectionAddress()` joins through both.
+
+### Match-found request flow
+
+1. Client opens a WebSocket on `/match/join?gameID=…&metadata=…` with a JWT.
+2. [`src/api/match/matchmaking.go`](src/api/match/matchmaking.go) calls `matchmaking.JoinQueue`, which writes the player into a Redis list (`queue_<queueID>`, where `queueID` may be `gameID` or `gameID::<sha256(metadata)>` for metadata-segmented games — see PR #2).
+3. The worker goroutine ([`src/worker/worker.go`](src/worker/worker.go)) wakes on a pubsub trigger and runs `matchmaking.PairPlayers` (rate-limited by `MATCHMAKING_INTERVAL`, default 100 ms).
+4. When the queue reaches `LobbySize`, the worker calls `matchmaking.StartMatch`:
+   - finds an available host (or provisions one),
+   - allocates host ports for the game's port count,
+   - tells the agent to start a container via `POST /containers`,
+   - persists the `ServerInstance` and `Match` rows,
+   - publishes `match_<matchID>` on `match_ready_<gameID>__<playerID>` for each player.
+5. The matchmaker WebSocket subscribes to that channel via `matchmaking.NotifyOnReady`. On receipt it polls the agent's `/containers/<id>/health` until ready, then pushes the final message:
+   ```json
+   { "status": "match_found",
+     "server_host":  "<host_public_ip>",
+     "server_ports": [<host_port>, …],
+     "match_id":     "<uuid>" }
+   ```
+   No `auth_code` — players are identified by their JWT-derived player IDs on the game server side (see PR #5 changes).
+
+### Lobby flow
+
+[`src/api/lobby/`](src/api/lobby/) — three WebSocket routes (`/lobby/host`, `/lobby/find`, `/lobby/join`) plus chat/`/disconnect`/`/start` host commands. Reuses the same `match_ready_<gameID>__<playerID>` pubsub channel as matchmaking, so post-`/start` clients get the identical `match_found` handshake.
+
+Capacity is enforced atomically via a Lua script in [`src/external/redis/lobby.go`](src/external/redis/lobby.go) — concurrent joiners can't both pass the cap check.
+
+### Worker
+
+Single in-process goroutine in [`src/worker/worker.go`](src/worker/worker.go). Two pubsub triggers (`matchmaking`, `garbage_collection`) wake it; an interval floor on each prevents thrash. The GC pass runs `GarbageCollectMatches`, `CleanupExpiredPlayers`, `CleanupExpiredLobbies`, and `MaintainWarmPool` in sequence.
+
+### Warm pool
+
+[`src/worker/matchmaking/warmPool.go`](src/worker/matchmaking/warmPool.go) keeps at least `HCLOUD_WARM_SLOTS` container slots ready across already-provisioned hosts (capped by `HCLOUD_MAX_HOSTS`). Runs at startup and on every GC tick. With `HCLOUD_WARM_SLOTS=0`, every match pays cold-start (~30-60 s). Currently set to `1` on the staging Fly app.
+
+### Singletons
+
+`server.S` is a package-level global ([`src/server/server.go`](src/server/server.go)) holding the DB, Redis, AWS, Hetzner, and (eventually) DNS/Cert clients. Models reach into `server.S.DB` directly — there is no repository abstraction. The Hetzner client is wired through the [`MachineService`](src/server/interfaces.go) interface so integration tests can inject a mock that simulates the agent.
+
+### Migrations
+
+[`src/models/migrations.go`](src/models/migrations.go) uses `gormigrate` wrapped in `pg_advisory_lock(42)` so multiple Fly machines starting concurrently don't race on schema. After named migrations, an unconditional `AutoMigrate` runs over every model — so adding a column to a struct ships without a new migration step. The named migrations exist for destructive schema changes (e.g. dropping the old per-match `machine_*` columns when the host-pool model landed).
+
+## Auth model
+
+JWT-based, two token types validated in [`src/api/auth/middleware.go`](src/api/auth/middleware.go):
+
+- **User token** — registered users; `claims.UserID` is a UUID. Admins (`user.IsAdmin`) can set `ImpersonationID` in the claim to act as another user or guest.
+- **Guest token** — anonymous; `claims.ID` starts with `g_`. Use [`util.IsGuestID`](src/util/guest.go) to distinguish.
+
+Use `RequireUserOrGuestAuth` for endpoints that accept either; `c.Get("id")` always returns the effective player ID after impersonation resolution.
+
+## Testing
+
+Two test suites:
+
+- **`tests/integration/`** (preferred for new work) — boots the full server in-process per test using miniredis + pure-Go SQLite + a mock host agent that responds to `/containers/*` endpoints. No external services needed; runs in ~13 s, ~33 tests today. CI runs this on every PR.
+- **`tests/e2e/`** — hits a running server (local or staging) through real HTTP/WebSocket. Requires the service to be up; CI does not run it.
+
+The integration tests use a hand-rolled SQLite schema in [`tests/integration/sqlite.go`](tests/integration/sqlite.go) (Postgres advisory locks + `pq.StringArray` aren't SQLite-portable). A `assertSchemaMatchesModels` drift guard runs on every test setup and fails fast with a clear error if a new model column is missing from the SQLite schema — **always update `sqlite.go` when you add a column to a model**.
+
+## Common commands
+
+Run from the repo root unless noted.
+
+| Task | Command |
+|---|---|
+| Local dev (Docker compose: app + Postgres + Redis) | `make up` / `make down` / `make logs` |
+| Local with fresh build | `make fresh` |
+| Connect to local Postgres / Redis | `make pg-local` / `make redis-local` |
+| Connect to staging Postgres / Redis | `make pg-stg` / `make redis-stg` |
+| Build & push the example game-server image | `make example-push` |
+| Build & push the sidecar image | `make sidecar-push` |
+| Regenerate swagger docs | `make swagger` (requires `swag` v1.16.6 in `$GOPATH/bin`) |
+| Build everything | `go build ./...` |
+| Integration tests (matches CI) | `go test -count=1 -timeout 180s ./tests/integration/...` |
+| E2E test against staging | `go test -v ./tests/e2e -args -url https://elomm.net` |
+| Single integration test | `go test -count=1 -run TestMatchPairingTwoGuests ./tests/integration/...` |
+
+## Environment variables
+
+[`src/server/config.go`](src/server/config.go) is the source of truth. **Required** at startup or the process panics: `FLY_API_HOSTNAME`, `FLY_API_KEY`, `FLY_APP_NAME`, `REDIS_URL`, `DATABASE_URL`, `HCLOUD_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_BUCKET_NAME`.
+
+Loaded from `.env` then `config.env` via `godotenv`. `.env` is gitignored; `staging.env` and `local.env` are checked in as references.
+
+Notable tunables:
+
+- `HCLOUD_HOST_TYPE` (default `cx33`) — validated against Hetzner's live catalog at startup so a deprecated type fails loudly instead of at first match.
+- `HCLOUD_MAX_HOSTS` (default 5), `HCLOUD_MAX_SLOTS_PER_HOST` (default 8), `HCLOUD_WARM_SLOTS` (default 0; production = 1).
+- `HCLOUD_AGENT_PORT` (default 8080), `HCLOUD_PORT_RANGE_START` / `_END` (default 7000-9000) — host-port pool the agent allocates from.
+- `MATCHMAKING_INTERVAL` (default 100 ms), `MATCH_GC_INTERVAL` (default 1 m) — minimum spacing between worker passes.
+
+## Domains
+
+- `elomm.net` and `www.elomm.net` — public matchmaker (Cloudflare DNS → Fly app, Let's Encrypt cert via Fly).
+- `gs.elomm.net` — reserved for per-game-server TLS hostnames (wildcard cert, used by the wildcard-TLS feature for WebGL clients connecting over `wss://`).
+
+## Project conventions
+
+**GORM nullable foreign keys must be pointer types.** A plain `string` defaults to `""` and gets stored as an empty string, not `NULL`, which breaks downstream `uuid` lookups (`SQLSTATE 22P02`). Use `*string` / `*uuid.UUID` and guard with `if x != nil && *x != ""` before dereferencing. Migrations adding such columns should also `UPDATE … SET col = NULL WHERE col = ''` to clean prior data. See [`.cursor/rules/gorm-nullable-fk.mdc`](.cursor/rules/gorm-nullable-fk.mdc).
+
+**Query param casing.** The matchmaking WebSocket uses `gameID` (camelCase), not `game_id`. This bites people often enough that `test_match.py` calls it out explicitly.
+
+**Match status codes.** Mutation endpoints distinguish 4xx flavors that callers can switch on:
+- `403 Forbidden` — caller is not the game owner (`models.ErrNotGameOwner`).
+- `409 Conflict` — uniqueness violation on create (game name, username, email).
+- `400 Bad Request` — missing required fields, malformed input.
+- `500` is reserved for actual internal errors.
