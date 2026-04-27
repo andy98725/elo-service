@@ -201,7 +201,13 @@ func (m *Manager) ensureUser(ctx context.Context) error {
 		AuthToken:          m.cfg.CloudflareToken,
 		PropagationTimeout: 2 * time.Minute,
 		PollingInterval:    2 * time.Second,
-		TTL:                60,
+		// 120 is lego's minimum TTL for the temporary _acme-challenge TXT
+		// records it creates during DNS-01 verification. The cert manager
+		// only writes these for ~30s during issuance/renewal, so the
+		// floor doesn't matter operationally — it just has to satisfy
+		// lego's validation. Per-host A records (in
+		// src/external/cloudflare/cloudflare.go) still use TTL=60.
+		TTL: 120,
 	})
 	if err != nil {
 		return fmt.Errorf("cloudflare dns provider: %w", err)
