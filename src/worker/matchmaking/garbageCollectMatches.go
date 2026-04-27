@@ -105,8 +105,6 @@ func CleanupExpiredPlayers(ctx context.Context) error {
 				}
 			}
 		}
-
-		return nil
 	}
 
 	return nil
