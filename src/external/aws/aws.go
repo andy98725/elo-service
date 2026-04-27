@@ -3,6 +3,7 @@ package aws
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -11,7 +12,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
+
+// ErrNotFound is returned by GetObject when the requested key does not
+// exist. The cert manager uses it to distinguish "no cert yet, please
+// issue one" from real S3 errors.
+var ErrNotFound = errors.New("aws: object not found")
 
 type AWSClient struct {
 	s3         *s3.Client
@@ -59,4 +66,34 @@ func (c *AWSClient) GetLogs(ctx context.Context, key string) (io.ReadCloser, err
 		return nil, err
 	}
 	return resp.Body, nil
+}
+
+// PutObject and GetObject are the generic blob-storage surface used by the
+// cert manager (full key, not the "logs/" prefix). GetObject returns
+// ErrNotFound on a missing key so the cert manager can detect "no cert
+// yet" without parsing SDK error types.
+func (c *AWSClient) PutObject(ctx context.Context, key string, body []byte) error {
+	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(c.bucketName),
+		Key:           aws.String(key),
+		Body:          bytes.NewReader(body),
+		ContentLength: aws.Int64(int64(len(body))),
+	})
+	return err
+}
+
+func (c *AWSClient) GetObject(ctx context.Context, key string) ([]byte, error) {
+	resp, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		var nsk *s3types.NoSuchKey
+		if errors.As(err, &nsk) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
 }

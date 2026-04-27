@@ -352,9 +352,10 @@ func handleMatchReady(ctx echo.Context, conn *websocket.Conn, payload string) {
 	}
 	// Match the matchmaking flow's wire format: server_host + server_ports +
 	// match_id, no auth_code (player IDs are the join key on the game server).
+	// Hostname preferred over IP when wildcard TLS is enabled.
 	conn.WriteJSON(echo.Map{
 		"status":       "match_found",
-		"server_host":  match.ServerInstance.MachineHost.PublicIP,
+		"server_host":  match.ServerInstance.MachineHost.PublicAddress(),
 		"server_ports": []int64(match.ServerInstance.HostPorts),
 		"match_id":     match.ID,
 	})

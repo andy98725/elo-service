@@ -36,7 +36,12 @@ func MaintainWarmPool(ctx context.Context) error {
 		slog.Info("Warm pool: provisioning VM to meet slot target",
 			"available", available, "target", cfg.HCLOUDWarmSlots)
 
-		connInfo, err := server.S.Machines.CreateHost(ctx, cfg.HCLOUDHostType, cfg.HCLOUDAgentPort)
+		tlsOpts, err := buildHostTLSOpts()
+		if err != nil {
+			slog.Error("Warm pool: failed to read wildcard cert", "error", err)
+			return err
+		}
+		connInfo, err := server.S.Machines.CreateHost(ctx, cfg.HCLOUDHostType, cfg.HCLOUDAgentPort, tlsOpts)
 		if err != nil {
 			slog.Error("Warm pool: failed to provision VM", "error", err)
 			return err
@@ -56,6 +61,10 @@ func MaintainWarmPool(ctx context.Context) error {
 			slog.Error("Warm pool: failed to mark host ready", "error", err)
 			return err
 		}
+
+		// Best-effort DNS record so wildcard-TLS clients can reach this
+		// host by hostname. No-op when the feature is disabled.
+		provisionDNSForHost(ctx, host, connInfo.PublicIP)
 
 		slog.Info("Warm pool: VM ready", "hostID", host.ID, "ip", connInfo.PublicIP)
 		available += int64(cfg.HCLOUDMaxSlotsPerHost)
