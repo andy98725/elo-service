@@ -247,6 +247,9 @@ write_files:
     content: |
       {
         auto_https off
+        servers {
+          protocols h1 h2
+        }
       }
 
 runcmd:
