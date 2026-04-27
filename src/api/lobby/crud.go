@@ -22,13 +22,13 @@ import (
 func FindLobby(ctx echo.Context) error {
 	gameID := ctx.QueryParam("gameID")
 	if gameID == "" {
-		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": "gameID is required"})
+		return echo.NewHTTPError(http.StatusBadRequest, "gameID is required")
 	}
 	wantedTags := parseTags(ctx.QueryParam("tags"))
 
 	records, err := server.S.Redis.LobbiesForGame(ctx.Request().Context(), gameID)
 	if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	resp := make([]*LobbyResp, 0, len(records))

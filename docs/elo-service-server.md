@@ -40,6 +40,7 @@ You **must** parse argv before doing anything else and fail loudly if either `-t
 
 ```go
 // Reference: example-game-server/main.go, func main()
+var tokenID string
 flag.StringVar(&tokenID, "token", "", "Token ID (required)")
 flag.Parse()
 playerIDs := flag.Args()
@@ -87,7 +88,7 @@ There is **no Authorization header** on this endpoint — the per-match `token_i
 > **Where does the URL come from?** The matchmaker does **not** inject any environment variables into your container, so the reporting URL has to come from somewhere you control. Two common patterns:
 >
 > 1. **Hard-code it** in your source. Simplest; fine for production-only servers. Use `https://elomm.net/result/report`.
-> 2. **Bake it via Dockerfile `ENV`** — useful if you want to point at a local elo-service during development. The reference image uses this (currently pinned to the Fly internal hostname, which routes to the same service):
+> 2. **Bake it via Dockerfile `ENV`** — useful if you want to point at a local elo-service during development. The reference image uses this (currently pinned to the Fly-assigned public hostname, which routes to the same service):
 >     ```dockerfile
 >     ARG WEBSITE_URL=https://elo-service.fly.dev/result/report
 >     ENV WEBSITE_URL=$WEBSITE_URL
@@ -117,7 +118,7 @@ The client opens a connection to `<server_host>:<server_ports[i]>`. They will co
 - `http://` or `https://` for HTTP
 - raw TCP/UDP for native protocols
 
-**On TLS-enabled hosts**, browser clients use `wss://` / `https://` and Caddy terminates TLS before traffic reaches you. Your server still sees plain HTTP/TCP from `127.0.0.1`. **You do not need to handle TLS in your code.**
+**On TLS-enabled hosts**, browser clients use `wss://` / `https://` and Caddy terminates TLS before traffic reaches you. Your server sees plain HTTP/TCP from the Docker bridge gateway (typically `172.17.0.1`), not the original client's address — so don't try to use `RemoteAddr` for player identification or geo-IP. **You do not need to handle TLS in your code.**
 
 ### Player identification
 
@@ -147,7 +148,7 @@ The player ID is **not cryptographically signed** at connect time. A determined 
 
 ## Registering your game
 
-Before your image can be used, register a `Game` record. This requires a non-guest user account.
+Before your image can be used, register a `Game` record. This requires a registered (non-guest) user account **with the `can_create_game` flag set**. The flag defaults to `false` for new accounts and is admin-grantable only — if you've just signed up, **this requires admin assistance**. Without it the call returns `403 "user is not allowed to create games"`.
 
 ```http
 POST /game
@@ -176,7 +177,7 @@ Field reference:
 |---|---|---|---|
 | `name` | yes | — | Globally unique. `409` if taken. |
 | `description` | no | `""` | User-facing. |
-| `matchmaking_machine_name` | yes | — | Full Docker image ref (`registry/repo:tag`). The host VM must be able to `docker pull` it — public images on Docker Hub work; private registries need credentials configured on the host VM image. |
+| `matchmaking_machine_name` | no | `docker.io/andy98725/example-server:latest` | Full Docker image ref (`registry/repo:tag`). The host VM must be able to `docker pull` it — public images on Docker Hub work; private registries need credentials configured on the host VM image. **Almost always set this**: omitting it silently falls back to the demo example-server, which is rarely what you want for a real game. |
 | `matchmaking_machine_ports` | no | `[]` | The ports your container listens on. Order is preserved in the client `server_ports` array. |
 | `lobby_size` | no | `2` | Players per match. Matchmaker waits for this many before spawning. |
 | `lobby_enabled` | no | `true` | Whether the lobby flow (`/lobby/*`) is allowed for this game. |
@@ -213,11 +214,11 @@ import (
 const reportURL = "https://elomm.net/result/report"
 
 func main() {
-    var token string
-    flag.StringVar(&token, "token", "", "match token (required)")
+    var tokenID string
+    flag.StringVar(&tokenID, "token", "", "match token (required)")
     flag.Parse()
     expected := flag.Args()
-    if token == "" || len(expected) == 0 {
+    if tokenID == "" || len(expected) == 0 {
         log.Fatal("missing -token or player IDs")
     }
     log.Printf("starting match: players=%v", expected) // never log the token
@@ -258,7 +259,7 @@ func main() {
     winner := expected[0] // pick the real winner
 
     body, _ := json.Marshal(map[string]any{
-        "token_id":   token,
+        "token_id":   tokenID,
         "winner_ids": []string{winner},
         "reason":     "completed",
     })

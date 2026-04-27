@@ -14,3 +14,6 @@
 # Environment variables
 *.env
 !config.env
+
+# Claude Code local config
+.claude/settings.local.json

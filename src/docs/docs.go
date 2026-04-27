@@ -57,6 +57,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/echo.HTTPError"
                         }
                     },
+                    "403": {
+                        "description": "user is not allowed to create games",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
                     "409": {
                         "description": "game name already taken",
                         "schema": {
@@ -133,12 +139,7 @@ const docTemplate = `{
         },
         "/game/{id}": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Returns a single game by its UUID",
+                "description": "Returns a single game by its UUID. Public — no auth required.",
                 "produces": [
                     "application/json"
                 ],
@@ -1046,14 +1047,58 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Updates the authenticated user's profile (not yet implemented)",
+                "description": "Updates user fields. Defaults to the authenticated user;\nadmins may target another user with ` + "`" + `?id=\u003cuserID\u003e` + "`" + `.\n` + "`" + `can_create_game` + "`" + ` is admin-only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "Users"
                 ],
-                "summary": "Update current user",
+                "summary": "Update a user",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Target user UUID (admin only)",
+                        "name": "id",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/src_api_user.UpdateUserRequest"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "OK"
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_andy98725_elo-service_src_models.UserResp"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
                     }
                 }
             },
@@ -1495,6 +1540,12 @@ const docTemplate = `{
                 },
                 "owner": {
                     "$ref": "#/definitions/github_com_andy98725_elo-service_src_models.UserResp"
+                },
+                "public_match_logs": {
+                    "type": "boolean"
+                },
+                "public_results": {
+                    "type": "boolean"
                 }
             }
         },
@@ -1598,7 +1649,7 @@ const docTemplate = `{
                 "public_match_logs": {
                     "type": "boolean"
                 },
-                "public_match_results": {
+                "public_results": {
                     "type": "boolean"
                 }
             }
@@ -1606,6 +1657,9 @@ const docTemplate = `{
         "github_com_andy98725_elo-service_src_models.UserResp": {
             "type": "object",
             "properties": {
+                "can_create_game": {
+                    "type": "boolean"
+                },
                 "email": {
                     "type": "string"
                 },
@@ -1655,6 +1709,12 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "public_match_logs": {
+                    "type": "boolean"
+                },
+                "public_results": {
+                    "type": "boolean"
                 }
             }
         },
@@ -1711,6 +1771,15 @@ const docTemplate = `{
                 },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "src_api_user.UpdateUserRequest": {
+            "type": "object",
+            "properties": {
+                "can_create_game": {
+                    "description": "CanCreateGame is admin-only. Pointer so we can distinguish \"field\nomitted\" from \"explicit false\" — non-admins setting it (either value)\ngets a 403.",
+                    "type": "boolean"
                 }
             }
         }

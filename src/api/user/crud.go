@@ -48,7 +48,7 @@ func GetUser(ctx echo.Context) error {
 func GetUsers(ctx echo.Context) error {
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
-		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
 	users, nextPage, err := models.GetUsers(page, pageSize)

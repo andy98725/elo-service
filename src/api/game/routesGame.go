@@ -7,7 +7,7 @@ import (
 
 func InitRoutes(e *echo.Echo) error {
 	e.POST("/game", CreateGame, auth.RequireUserAuth)
-	e.GET("/game/:id", GetGame, auth.RequireUserAuth)
+	e.GET("/game/:id", GetGame)
 	e.GET("/user/game", GetGamesOfUser, auth.RequireUserAuth)
 	e.PUT("/game/:id", UpdateGame, auth.RequireUserAuth)
 	e.DELETE("/game/:id", DeleteGame, auth.RequireUserAuth)

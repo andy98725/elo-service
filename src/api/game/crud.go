@@ -28,7 +28,7 @@ func isUniqueConstraintViolation(err error) bool {
 type CreateGameRequest struct {
 	Name                    string  `json:"name"`
 	Description             string  `json:"description"`
-	GuestsAllowed           bool    `json:"guests_allowed"`
+	GuestsAllowed           *bool   `json:"guests_allowed"`
 	LobbyEnabled            *bool   `json:"lobby_enabled"`
 	LobbySize               int     `json:"lobby_size"`
 	MatchmakingStrategy     string  `json:"matchmaking_strategy"`
@@ -111,7 +111,7 @@ func CreateGame(ctx echo.Context) error {
 func GetGames(ctx echo.Context) error {
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
-		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
 	games, nextPage, err := models.GetGames(page, pageSize)
@@ -131,10 +131,9 @@ func GetGames(ctx echo.Context) error {
 
 // GetGame godoc
 // @Summary      Get a game by ID
-// @Description  Returns a single game by its UUID
+// @Description  Returns a single game by its UUID. Public — no auth required.
 // @Tags         Games
 // @Produce      json
-// @Security     BearerAuth
 // @Param        id path string true "Game UUID"
 // @Success      200 {object} models.GameResp
 // @Failure      400 {object} echo.HTTPError

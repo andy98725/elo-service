@@ -166,7 +166,7 @@ func TestMetadataExceedsMaxSize(t *testing.T) {
 	resp := DoReq(t, "GET",
 		fmt.Sprintf("%s/match/size?gameID=%s&metadata=%s", h.BaseURL(), gameID, huge),
 		nil, guestToken, http.StatusBadRequest)
-	if !strings.Contains(fmt.Sprintf("%v", resp["error"]), "metadata") {
-		t.Errorf("expected metadata-size error, got %v", resp["error"])
+	if !strings.Contains(fmt.Sprintf("%v", resp["message"]), "metadata") {
+		t.Errorf("expected metadata-size error, got %v", resp["message"])
 	}
 }

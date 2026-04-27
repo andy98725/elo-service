@@ -28,7 +28,7 @@ func GetMatchResult(ctx echo.Context) error {
 	if err == gorm.ErrRecordNotFound {
 		return echo.NewHTTPError(http.StatusNotFound, "Match result not found")
 	} else if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	if canSee, err := models.CanUserSeeMatchResult(id, matchID); err != nil {
@@ -58,12 +58,12 @@ func GetMatchResultsOfGame(ctx echo.Context) error {
 	id := ctx.Get("id").(string)
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
-		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
 	matchResults, nextPage, err := models.GetMatchResultsOfGame(gameID, page, pageSize)
 	if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	matchResultsResp := []models.MatchResultResp{}
@@ -95,12 +95,12 @@ func GetMatchResultsOfCurrentUser(ctx echo.Context) error {
 	id := ctx.Get("id").(string)
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
-		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
 	matchResults, nextPage, err := models.GetMatchResultsOfPlayer(id, page, pageSize)
 	if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	matchResultsResp := make([]models.MatchResultResp, len(matchResults))
@@ -127,12 +127,12 @@ func GetMatchResultsOfCurrentUser(ctx echo.Context) error {
 func GetMatchResults(ctx echo.Context) error {
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
-		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
 	matchResults, nextPage, err := models.GetMatchResults(page, pageSize)
 	if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	matchResultsResp := make([]models.MatchResultResp, len(matchResults))
@@ -161,12 +161,12 @@ func GetMatchResultsOfUser(ctx echo.Context) error {
 	id := ctx.Param("userID")
 	page, pageSize, err := util.ParsePagination(ctx)
 	if err != nil {
-		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": err.Error()})
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
 	matchResults, nextPage, err := models.GetMatchResultsOfPlayer(id, page, pageSize)
 	if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	matchResultsResp := make([]models.MatchResultResp, len(matchResults))

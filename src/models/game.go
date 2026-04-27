@@ -60,6 +60,8 @@ type GameResp struct {
 	MatchmakingMachinePorts []int64  `json:"matchmaking_machine_ports"`
 	ELOStrategy             string   `json:"elo_strategy"`
 	MetadataEnabled         bool     `json:"metadata_enabled"`
+	PublicResults           bool     `json:"public_results"`
+	PublicMatchLogs         bool     `json:"public_match_logs"`
 }
 
 func (u *Game) ToResp() *GameResp {
@@ -76,13 +78,15 @@ func (u *Game) ToResp() *GameResp {
 		MatchmakingMachinePorts: []int64(u.MatchmakingMachinePorts),
 		ELOStrategy:             u.ELOStrategy,
 		MetadataEnabled:         u.MetadataEnabled,
+		PublicResults:           u.PublicResults,
+		PublicMatchLogs:         u.PublicMatchLogs,
 	}
 }
 
 type CreateGameParams struct {
 	Name                    string
 	Description             string
-	GuestsAllowed           bool
+	GuestsAllowed           *bool
 	PublicResults           *bool
 	LobbyEnabled            *bool
 	LobbySize               int
@@ -116,6 +120,11 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		lobbyEnabled = *params.LobbyEnabled
 	}
 
+	guestsAllowed := true
+	if params.GuestsAllowed != nil {
+		guestsAllowed = *params.GuestsAllowed
+	}
+
 	publicResults := true
 	if params.PublicResults != nil {
 		publicResults = *params.PublicResults
@@ -131,7 +140,7 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		Owner:                   owner,
 		Name:                    params.Name,
 		Description:             params.Description,
-		GuestsAllowed:           params.GuestsAllowed,
+		GuestsAllowed:           guestsAllowed,
 		PublicResults:           publicResults,
 		LobbyEnabled:            lobbyEnabled,
 		LobbySize:               params.LobbySize,
@@ -188,7 +197,7 @@ type UpdateGameParams struct {
 	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
 	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
 	ELOStrategy             string  `json:"elo_strategy"`
-	PublicResults           *bool   `json:"public_match_results"`
+	PublicResults           *bool   `json:"public_results"`
 	PublicMatchLogs         *bool   `json:"public_match_logs"`
 	MetadataEnabled         *bool   `json:"metadata_enabled"`
 }

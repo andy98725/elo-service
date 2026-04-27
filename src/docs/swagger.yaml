@@ -36,6 +36,10 @@ definitions:
         type: string
       owner:
         $ref: '#/definitions/github_com_andy98725_elo-service_src_models.UserResp'
+      public_match_logs:
+        type: boolean
+      public_results:
+        type: boolean
     type: object
   github_com_andy98725_elo-service_src_models.MatchResp:
     properties:
@@ -103,11 +107,13 @@ definitions:
         type: string
       public_match_logs:
         type: boolean
-      public_match_results:
+      public_results:
         type: boolean
     type: object
   github_com_andy98725_elo-service_src_models.UserResp:
     properties:
+      can_create_game:
+        type: boolean
       email:
         type: string
       id:
@@ -141,6 +147,10 @@ definitions:
         type: boolean
       name:
         type: string
+      public_match_logs:
+        type: boolean
+      public_results:
+        type: boolean
     type: object
   src_api_matchResults.ReportResultsRequest:
     properties:
@@ -178,6 +188,15 @@ definitions:
       username:
         type: string
     type: object
+  src_api_user.UpdateUserRequest:
+    properties:
+      can_create_game:
+        description: |-
+          CanCreateGame is admin-only. Pointer so we can distinguish "field
+          omitted" from "explicit false" — non-admins setting it (either value)
+          gets a 403.
+        type: boolean
+    type: object
 host: localhost:8080
 info:
   contact: {}
@@ -206,6 +225,10 @@ paths:
             $ref: '#/definitions/github_com_andy98725_elo-service_src_models.GameResp'
         "400":
           description: Bad Request
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "403":
+          description: user is not allowed to create games
           schema:
             $ref: '#/definitions/echo.HTTPError'
         "409":
@@ -295,7 +318,7 @@ paths:
       tags:
       - Games
     get:
-      description: Returns a single game by its UUID
+      description: Returns a single game by its UUID. Public — no auth required.
       parameters:
       - description: Game UUID
         in: path
@@ -317,8 +340,6 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/echo.HTTPError'
-      security:
-      - BearerAuth: []
       summary: Get a game by ID
       tags:
       - Games
@@ -895,13 +916,45 @@ paths:
       tags:
       - Users
     put:
-      description: Updates the authenticated user's profile (not yet implemented)
+      consumes:
+      - application/json
+      description: |-
+        Updates user fields. Defaults to the authenticated user;
+        admins may target another user with `?id=<userID>`.
+        `can_create_game` is admin-only.
+      parameters:
+      - description: Target user UUID (admin only)
+        in: query
+        name: id
+        type: string
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/src_api_user.UpdateUserRequest'
+      produces:
+      - application/json
       responses:
         "200":
           description: OK
+          schema:
+            $ref: '#/definitions/github_com_andy98725_elo-service_src_models.UserResp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
       security:
       - BearerAuth: []
-      summary: Update current user
+      summary: Update a user
       tags:
       - Users
   /user/{userID}/results:

@@ -191,16 +191,16 @@ func statusRefresh(ctx context.Context, conn *websocket.Conn, status *string) *c
 func QueueSize(ctx echo.Context) error {
 	gameID := ctx.QueryParam("gameID")
 	if gameID == "" {
-		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": "gameID is required"})
+		return echo.NewHTTPError(http.StatusBadRequest, "gameID is required")
 	}
 	metadata := ctx.QueryParam("metadata")
 	if len(metadata) > maxMetadataBytes {
-		return ctx.JSON(http.StatusBadRequest, echo.Map{"error": "metadata exceeds maximum size"})
+		return echo.NewHTTPError(http.StatusBadRequest, "metadata exceeds maximum size")
 	}
 
 	size, err := matchmaking.QueueSize(ctx.Request().Context(), gameID, metadata)
 	if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return ctx.JSON(http.StatusOK, echo.Map{"players_in_queue": size})
 }

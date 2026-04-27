@@ -42,6 +42,8 @@ Content-Type: application/json
 { "displayName": "PlayerOne" }
 ```
 
+`displayName` is **required** — calling `/guest/login` without it (or with an empty string) returns `400 "displayName is required"`.
+
 Response `200`:
 ```json
 { "token": "eyJhbGciOi…", "displayName": "PlayerOne", "id": "g_<uuid>" }
@@ -78,10 +80,10 @@ Login is by email only. The optional `"displayName"` field in the request is ech
 
 Response `200`:
 ```json
-{ "token": "eyJhbGciOi…", "displayName": "alice", "id": "<uuid>" }
+{ "token": "eyJhbGciOi…", "displayName": "", "id": "<uuid>" }
 ```
 
-> **Quirk:** the `displayName` echoed in the response is *whatever you sent in the request*, not the canonical username. If you logged in by email and didn't send a `displayName`, you'll get back an empty string. Use the `id` from this response (or call `GET /user`) if you need the actual username.
+> **Quirk:** the `displayName` echoed in the *response body* is whatever you sent in the request, not the canonical username — so for a typical email-only login (no `displayName` in the body) the response field is an empty string, as shown above. The JWT itself is unaffected: when `displayName` is omitted, the token's `display_name` claim is backfilled with the user's `username`. Use the JWT claim, the `id` from this response, or `GET /user` if you need the actual username.
 
 Errors: `400` (missing fields), `401` (bad credentials).
 
@@ -102,7 +104,7 @@ Every match is for a specific **game** — a registered Docker image + match con
 
 | Route | Method | Auth | Purpose |
 |---|---|---|---|
-| `/game/{id}` | GET | user | Fetch one game by UUID |
+| `/game/{id}` | GET | none | Fetch one game by UUID (public) |
 | `/user/game?page=&pageSize=` | GET | user | List games owned by the current user |
 
 Game listings return:
@@ -121,12 +123,16 @@ Game listings return:
       "matchmaking_machine_name": "alice/tictactoe:latest",
       "matchmaking_machine_ports": [8080],
       "elo_strategy": "unranked",
-      "metadata_enabled": false
+      "metadata_enabled": false,
+      "public_results": true,
+      "public_match_logs": false
     }
   ],
-  "nextPage": 2
+  "nextPage": 1
 }
 ```
+
+`nextPage` is the index to pass as `page` on the next call, **or `-1` if you've reached the end of the list** (the page returned fewer rows than `pageSize`). Stop paginating when you see `-1`.
 
 There is currently **no public "browse all games" endpoint** — get the game UUID out of band (config, link, etc.) and queue against it.
 
@@ -157,8 +163,7 @@ Every message is `{ "status": "<string>", … }`. You'll always see them in roug
 // 1. Right after the queue join succeeds.
 { "status": "queue_joined", "players_in_queue": 3 }
 
-// 2. Heartbeat sent every ~5s while waiting in queue.
-//    Treat as a keepalive; no other fields.
+// 2. Heartbeat sent every ~5s while the WS is open. Treat as a keepalive.
 { "status": "searching" }
 
 // 3. Lobby filled, container is being spun up.
@@ -173,6 +178,8 @@ Every message is `{ "status": "<string>", … }`. You'll always see them in roug
   "match_id":     "<uuid>"
 }
 ```
+
+> **Heartbeat continues across phases.** The same 5s ticker that emits `{"status": "searching"}` keeps firing through `server_starting` too: once the queue fills, you'll see one `server_starting` frame *with* the `message` field (shown above), then bare `{"status": "server_starting"}` heartbeats every ~5s until `match_found`. Don't treat duplicate `server_starting` frames as a bug.
 
 On failure, you'll get exactly one error frame and the WS will close:
 
@@ -244,10 +251,12 @@ The game server will reject you with `403 Forbidden` if your ID isn't in its exp
 ### Queue size (HTTP)
 
 ```http
-GET /match/size?gameID=<uuid>&token=<jwt>
+GET /match/size?gameID=<uuid>&metadata=<string>&token=<jwt>
 ```
 
 Response `200`: `{ "players_in_queue": 4 }`. Useful for showing "Searching… (4 players in queue)" UI without having to be in the queue yourself.
+
+`metadata` is optional and follows the same rules as on `/match/join` — only honored when `metadata_enabled=true`, max 4096 bytes, and segments the count to the matching sub-queue. For metadata-segmented games, calling `/match/size` without `metadata` returns the *empty* sub-queue's size, which is rarely what you want.
 
 ---
 
@@ -264,7 +273,9 @@ After a match ends, the game server reports its result to elo-service, which per
 | `/user/results?page=&pageSize=` | GET | user/guest | The caller's own match history |
 | `/results/{matchID}/logs` | GET | user/guest | Container stdout for the match (only if the game has `public_match_logs=true`, else owner-only) |
 
-Visibility is enforced server-side per the game's `public_results` flag — non-public games only show results to participants/owners. `404 Not Found` is returned both for missing results and for results the caller can't see (don't infer existence from the status code).
+Visibility is enforced server-side per the game's `public_results` flag — non-public games only show results to participants/owners. The result-fetch routes return `404 Not Found` both for missing results and for results the caller can't see (don't infer existence from the status code).
+
+`/results/{matchID}/logs` is the exception: when `public_match_logs=false` and the caller isn't the game owner (or an admin), it returns `403 Forbidden "Match logs are not public."`, not `404`. A `404` from this route means the match result itself doesn't exist (or isn't visible) or has no stored logs.
 
 ---
 
@@ -281,7 +292,7 @@ GET /lobby/host?gameID=<uuid>&tags=tag1,tag2&metadata=<string>&token=<jwt>
 ```
 
 Optional:
-- `tags` — comma-separated, max 16 tags. Searchable via `/lobby/find`.
+- `tags` — comma-separated, **first 16 tags kept** (extras silently dropped, not rejected). Searchable via `/lobby/find`.
 - `metadata` — opaque string stored on the lobby record (visible to all joiners).
 
 Upgrades to WebSocket. The connecting player **is** the host.
@@ -426,7 +437,7 @@ WebSocket failures use the in-band `{"status": "error", "error": …}` frame ins
 | `POST` | `/user` | none | Register |
 | `POST` | `/user/login` | none | Login |
 | `GET`  | `/user` | user | Current user info |
-| `GET`  | `/game/{id}` | user | Fetch a game by UUID |
+| `GET`  | `/game/{id}` | none | Fetch a game by UUID (public) |
 | `GET`  | `/user/game` | user | List your games |
 | `GET`  | `/match/size` | user/guest | Queue size for a game |
 | `GET`  | `/match/join` | user/guest | **WebSocket** matchmaking |
