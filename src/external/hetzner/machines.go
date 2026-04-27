@@ -252,7 +252,7 @@ write_files:
 runcmd:
   - systemctl start docker
   # Generate per-port reverse_proxy stanzas for the entire game-port range.
-  - bash -c 'cp /etc/caddy/Caddyfile.head /etc/caddy/Caddyfile && for p in $(seq %d %d); do echo ":$p { tls /etc/caddy/cert.pem /etc/caddy/key.pem; reverse_proxy localhost:$((p+%d)) }" >> /etc/caddy/Caddyfile; done'
+  - bash -c 'cp /etc/caddy/Caddyfile.head /etc/caddy/Caddyfile && for p in $(seq %d %d); do printf ":%%s {\n  tls /etc/caddy/cert.pem /etc/caddy/key.pem\n  reverse_proxy localhost:%%s\n}\n" "$p" "$((p+%d))" >> /etc/caddy/Caddyfile; done'
   - docker pull caddy:2
   - docker run -d --name caddy
       --restart always
