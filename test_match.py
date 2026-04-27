@@ -1,5 +1,5 @@
 """
-Live end-to-end matchmaking test for elo-service.fly.dev.
+Live end-to-end matchmaking test for the staging matchmaker.
 
 USAGE:
   python test_match.py
@@ -7,39 +7,45 @@ USAGE:
 WHAT IT DOES:
   Connects two players (one registered user, one guest) to the matchmaking
   queue for the "example" game simultaneously. When both are queued, the
-  matchmaking worker pairs them, provisions a Hetzner host VM (cold start:
-  ~2 min), starts a game container, and sends a match_ready message to both
-  WebSocket connections.
+  matchmaking worker pairs them, finds (or provisions) a host VM and a
+  container slot via the host agent, and sends a "match_found" message to
+  both WebSocket connections.
+
+  With HCLOUD_WARM_SLOTS=1 in production, the first match should land on a
+  pre-warmed host slot in <5s. A cold start (no warm slots, no existing
+  hosts with capacity) takes ~30-60s.
 
 KEY API FACTS:
   - Login:       POST /user/login          { email, password }
   - Guest token: POST /guest/login         { displayName }
   - Join queue:  GET  /match/join?gameID=<id>   (WebSocket, Authorization header)
   - Queue param is camelCase "gameID", NOT "game_id"
+  - match_found payload: { server_host, server_ports[], match_id }
+    (no auth_code — game-server identifies players by their player IDs)
 
 TOKENS:
   Tokens are short-lived JWTs. If you get 401/expired errors, re-run the
   login/guest-login curls below and paste fresh values into TOKEN_P1/TOKEN_P2.
 
   Login:
-    curl -s -X POST https://elo-service.fly.dev/user/login \\
+    curl -s -X POST https://elomm.net/user/login \\
       -H "Content-Type: application/json" \\
       -d '{"email":"andyhudson725@gmail.com","password":"basewars432!"}'
 
   Guest:
-    curl -s -X POST https://elo-service.fly.dev/guest/login \\
+    curl -s -X POST https://elomm.net/guest/login \\
       -H "Content-Type: application/json" \\
       -d '{"displayName":"bot1"}'
 
 GAME IDs (staging DB):
-  example    b2b8f32d-763e-4a63-b1ec-121a65e376f2  (port 8080, lobby 2)
+  example      b2b8f32d-763e-4a63-b1ec-121a65e376f2  (port 8080, lobby 2)
   Battle Bots  ed4ec9a6-b4ee-42c5-8feb-031e042bca8c  (port 7777, lobby 2)
 """
 import asyncio
 import json
 import websockets
 
-BASE_WS = "wss://elo-service.fly.dev"
+BASE_WS = "wss://elomm.net"
 GAME_ID = "b2b8f32d-763e-4a63-b1ec-121a65e376f2"
 
 TOKEN_P1 = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiMDFkOWRhYmYtYTAyYi00OGFiLTljMWEtZDdlODU0YjgzNWFkIiwiZGlzcGxheV9uYW1lIjoidGV0cjQiLCJ1c2VybmFtZSI6InRldHI0IiwiaW1wZXJzb25hdGlvbl9pZCI6IiIsImV4cCI6MTc3NjQ5MjMzNX0.lerPmjxIRcT_1no3E1R89_MT1yfuE0Z2KZ94czOFbcI"

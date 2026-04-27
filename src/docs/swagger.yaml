@@ -47,12 +47,12 @@ definitions:
         type: array
       id:
         type: string
-      machine_name:
-        type: string
       players:
         items:
           $ref: '#/definitions/github_com_andy98725_elo-service_src_models.UserResp'
         type: array
+      server_address:
+        type: string
       status:
         type: string
     type: object
