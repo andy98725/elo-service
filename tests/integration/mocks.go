@@ -5,98 +5,175 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 
 	"github.com/andy98725/elo-service/src/external/hetzner"
 )
 
+// MockMachineService stands in for a real Hetzner host pool. Each "host" it
+// creates is just a row in `hosts` — they all share a single in-process
+// HTTP server that simulates the host agent's container endpoints
+// (start/stop/health/logs). That's enough for tests because the matchmaker
+// only ever calls the agent over HTTP; it doesn't introspect VMs directly.
 type MockMachineService struct {
-	mu       sync.Mutex
-	servers  map[int64]*hetzner.MachineConnectionInfo
-	nextID   atomic.Int64
-	CreateFn func(ctx context.Context, config *hetzner.MachineConfig) (*hetzner.MachineConnectionInfo, error)
-	DeleteFn func(ctx context.Context, machineID int64, machineName string) error
+	mu        sync.Mutex
+	hosts     map[string]*hetzner.HostConnectionInfo // keyed by ProviderID
+	containers map[string]bool                       // containerID -> alive
+	nextHost  atomic.Int64
 
-	healthServer *http.Server
-	healthPort   int
+	// CreateFn / DeleteFn let individual tests override behavior (e.g. to
+	// inject errors). Nil = use the default in-memory implementation.
+	CreateFn func(ctx context.Context, serverType string, agentPort int64) (*hetzner.HostConnectionInfo, error)
+	DeleteFn func(ctx context.Context, providerID string) error
+
+	agentServer *http.Server
+	agentPort   int
 }
 
 func NewMockMachineService() *MockMachineService {
 	m := &MockMachineService{
-		servers: make(map[int64]*hetzner.MachineConnectionInfo),
+		hosts:      make(map[string]*hetzner.HostConnectionInfo),
+		containers: make(map[string]bool),
 	}
-	m.nextID.Store(1000)
+	m.nextHost.Store(1000)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+
+	// POST /containers — start a new game container, return a container ID.
+	// DELETE /containers/<id> — stop a container.
+	// GET /containers/<id>/health — 200 once the container is alive.
+	// GET /containers/<id>/logs — return mock log bytes.
+	mux.HandleFunc("/containers", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Don't actually parse the body — real agent does, mock just acks.
+		_, _ = io.Copy(io.Discard, r.Body)
+		idBytes := make([]byte, 8)
+		rand.Read(idBytes)
+		containerID := "mock-ctr-" + hex.EncodeToString(idBytes)
+		m.mu.Lock()
+		m.containers[containerID] = true
+		m.mu.Unlock()
+		json.NewEncoder(w).Encode(map[string]string{"container_id": containerID})
 	})
-	mux.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte("mock game server logs"))
+	mux.HandleFunc("/containers/", func(w http.ResponseWriter, r *http.Request) {
+		// Path looks like /containers/<id> or /containers/<id>/{health,logs}.
+		rest := strings.TrimPrefix(r.URL.Path, "/containers/")
+		parts := strings.SplitN(rest, "/", 2)
+		containerID := parts[0]
+		var sub string
+		if len(parts) == 2 {
+			sub = parts[1]
+		}
+		switch {
+		case sub == "health" && r.Method == http.MethodGet:
+			m.mu.Lock()
+			alive := m.containers[containerID]
+			m.mu.Unlock()
+			if alive {
+				w.WriteHeader(http.StatusOK)
+			} else {
+				http.Error(w, "no such container", http.StatusNotFound)
+			}
+		case sub == "logs" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "text/plain")
+			w.Write([]byte("mock game server logs"))
+		case sub == "" && r.Method == http.MethodDelete:
+			m.mu.Lock()
+			delete(m.containers, containerID)
+			m.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.Error(w, "not found", http.StatusNotFound)
+		}
 	})
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		panic("failed to listen for mock health server: " + err.Error())
+		panic("failed to listen for mock agent server: " + err.Error())
 	}
-	m.healthPort = ln.Addr().(*net.TCPAddr).Port
-	m.healthServer = &http.Server{Handler: mux}
-	go m.healthServer.Serve(ln)
+	m.agentPort = ln.Addr().(*net.TCPAddr).Port
+	m.agentServer = &http.Server{Handler: mux}
+	go m.agentServer.Serve(ln)
 
 	return m
 }
 
 func (m *MockMachineService) Close() {
-	if m.healthServer != nil {
-		m.healthServer.Close()
+	if m.agentServer != nil {
+		m.agentServer.Close()
 	}
 }
 
-func (m *MockMachineService) CreateServer(ctx context.Context, config *hetzner.MachineConfig) (*hetzner.MachineConnectionInfo, error) {
+// ValidateServerType is a no-op in tests — we don't talk to Hetzner at all,
+// so any name is fine.
+func (m *MockMachineService) ValidateServerType(ctx context.Context, serverType string) error {
+	return nil
+}
+
+func (m *MockMachineService) CreateHost(ctx context.Context, serverType string, agentPort int64) (*hetzner.HostConnectionInfo, error) {
 	if m.CreateFn != nil {
-		return m.CreateFn(ctx, config)
+		return m.CreateFn(ctx, serverType, agentPort)
 	}
 
-	id := m.nextID.Add(1)
+	id := m.nextHost.Add(1)
 	tokenBytes := make([]byte, 16)
 	rand.Read(tokenBytes)
 
-	info := &hetzner.MachineConnectionInfo{
-		MachineName: fmt.Sprintf("mock-server-%d", id),
-		MachineID:   id,
-		AuthCode:    hex.EncodeToString(tokenBytes),
-		PublicIP:    "127.0.0.1",
-		LogsPort:    int64(m.healthPort),
+	// All "hosts" share the in-process agent server — different ProviderIDs,
+	// same (IP, AgentPort). That's harmless because StartContainer responds
+	// uniformly and CreateMachineHost stores them as distinct DB rows.
+	info := &hetzner.HostConnectionInfo{
+		ProviderID: fmt.Sprintf("mock-host-%d", id),
+		PublicIP:   "127.0.0.1",
+		AgentPort:  int64(m.agentPort),
+		AgentToken: hex.EncodeToString(tokenBytes),
 	}
 
 	m.mu.Lock()
-	m.servers[id] = info
+	m.hosts[info.ProviderID] = info
 	m.mu.Unlock()
 
 	return info, nil
 }
 
-func (m *MockMachineService) DeleteServer(ctx context.Context, machineID int64, machineName string) error {
+func (m *MockMachineService) DeleteHost(ctx context.Context, providerID string) error {
 	if m.DeleteFn != nil {
-		return m.DeleteFn(ctx, machineID, machineName)
+		return m.DeleteFn(ctx, providerID)
 	}
 
 	m.mu.Lock()
-	delete(m.servers, machineID)
+	delete(m.hosts, providerID)
 	m.mu.Unlock()
 	return nil
 }
 
-func (m *MockMachineService) ActiveServers() int {
+// ActiveHosts returns the count of "live" host VMs the mock has been asked
+// to create and not delete. Hosts are long-lived in the host-pool model;
+// tests asserting about per-match teardown should use ActiveContainers
+// instead.
+func (m *MockMachineService) ActiveHosts() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return len(m.servers)
+	return len(m.hosts)
+}
+
+// ActiveContainers returns the number of game containers the mock agent
+// has been asked to start and not stop. This is the per-match counter:
+// matches add a container, match-end / GC removes it.
+func (m *MockMachineService) ActiveContainers() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.containers)
 }
 
 type MockStorageService struct {

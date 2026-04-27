@@ -117,34 +117,122 @@ func NotifyOnReady(ctx context.Context, playerID string, gameID string, resultCh
 	}()
 }
 
+func notifyError(ctx context.Context, gameID string, players []string, msg string) {
+	for _, player := range players {
+		server.S.Redis.PublishMatchReady(ctx, gameID, player, "error:"+msg)
+	}
+}
+
+// StartMatch finds (or provisions) a host with capacity, allocates ports,
+// starts a game container via the host agent, persists the ServerInstance
+// + Match, and notifies all paired players. Exported so the lobby flow can
+// reuse it after a host runs `/start` — same handshake, same backing
+// machinery.
 func StartMatch(ctx context.Context, gameID string, game *models.Game, players []string) error {
 	slog.Info("Starting match", "gameID", gameID, "players", players)
-	// Create the k8s image containing the match
-	connInfo, err := server.S.Machines.CreateServer(ctx, &hetzner.MachineConfig{
-		GameName:                game.Name,
-		MatchmakingMachineName:  game.MatchmakingMachineName,
-		MatchmakingMachinePorts: game.MatchmakingMachinePorts,
-		PlayerIDs:               players,
+
+	gamePorts := []int64(game.MatchmakingMachinePorts)
+	if len(gamePorts) == 0 {
+		err := fmt.Errorf("game %s has no ports configured; set matchmaking_machine_ports", gameID)
+		slog.Error("Cannot start match", "error", err)
+		notifyError(ctx, gameID, players, "server configuration error: no ports defined for this game")
+		return err
+	}
+
+	cfg := server.S.Config
+
+	// Find a host with available capacity, or create one.
+	host, err := models.FindAvailableHost(len(gamePorts), cfg.HCLOUDPortRangeStart, cfg.HCLOUDPortRangeEnd)
+	if err != nil {
+		slog.Error("Failed to find available host", "error", err)
+		notifyError(ctx, gameID, players, "failed to find available server host")
+		return err
+	}
+
+	if host == nil {
+		count, err := models.CountMachineHosts()
+		if err != nil {
+			notifyError(ctx, gameID, players, "internal error")
+			return fmt.Errorf("count machine hosts: %w", err)
+		}
+		if count >= int64(cfg.HCLOUDMaxHosts) {
+			slog.Warn("At capacity: all hosts full and max count reached", "maxHosts", cfg.HCLOUDMaxHosts)
+			server.S.Redis.PushPlayersToQueue(ctx, gameID, players)
+			return fmt.Errorf("at capacity: %d/%d hosts in use", count, cfg.HCLOUDMaxHosts)
+		}
+
+		slog.Info("No available host; provisioning new one")
+		connInfo, err := server.S.Machines.CreateHost(ctx, cfg.HCLOUDHostType, cfg.HCLOUDAgentPort)
+		if err != nil {
+			slog.Error("Failed to provision host VM", "error", err)
+			notifyError(ctx, gameID, players, "failed to provision server host")
+			return err
+		}
+
+		host, err = models.CreateMachineHost(
+			connInfo.ProviderID, connInfo.PublicIP, connInfo.AgentToken,
+			connInfo.AgentPort, cfg.HCLOUDMaxSlotsPerHost,
+		)
+		if err != nil {
+			slog.Error("Failed to save host to DB; attempting VM cleanup", "error", err, "providerID", connInfo.ProviderID)
+			server.S.Machines.DeleteHost(context.Background(), connInfo.ProviderID)
+			notifyError(ctx, gameID, players, "internal error")
+			return err
+		}
+
+		if err := models.SetMachineHostReady(host.ID); err != nil {
+			slog.Error("Failed to mark host ready", "error", err)
+		}
+	}
+
+	// Allocate host ports for this container.
+	hostPorts, err := models.AllocatePorts(host.ID, len(gamePorts), cfg.HCLOUDPortRangeStart, cfg.HCLOUDPortRangeEnd)
+	if err != nil {
+		slog.Error("Failed to allocate ports", "error", err, "hostID", host.ID)
+		notifyError(ctx, gameID, players, "no ports available on server host")
+		return err
+	}
+
+	authToken, err := hetzner.GenerateToken()
+	if err != nil {
+		models.FreePorts(host.ID, hostPorts)
+		notifyError(ctx, gameID, players, "internal error")
+		return fmt.Errorf("generate auth token: %w", err)
+	}
+
+	containerID, err := hetzner.StartContainer(ctx, host.PublicIP, host.AgentPort, host.AgentToken, hetzner.ContainerConfig{
+		Image:     game.MatchmakingMachineName,
+		GamePorts: gamePorts,
+		HostPorts: hostPorts,
+		Token:     authToken,
+		PlayerIDs: players,
 	})
 	if err != nil {
-		slog.Error("Failed to spawn machine", "error", err, "gameID", gameID, "players", players)
-		for _, player := range players {
-			server.S.Redis.PublishMatchReady(ctx, gameID, player, "error:failed to spawn machine: "+err.Error())
-		}
+		slog.Error("Failed to start game container", "error", err, "hostID", host.ID)
+		models.FreePorts(host.ID, hostPorts)
+		notifyError(ctx, gameID, players, "failed to start game server: "+err.Error())
 		return err
 	}
 
-	// Store the match connection info in sql
-	match, err := models.MatchStarted(gameID, connInfo, players)
+	si, err := models.CreateServerInstance(host.ID, containerID, authToken, gamePorts, hostPorts)
 	if err != nil {
-		slog.Error("Failed to create match", "error", err, "gameID", gameID, "players", players)
-		for _, player := range players {
-			server.S.Redis.PublishMatchReady(ctx, gameID, player, "error:failed to create match: "+err.Error())
-		}
+		slog.Error("Failed to save server instance", "error", err)
+		hetzner.StopContainer(context.Background(), host.PublicIP, host.AgentPort, host.AgentToken, containerID)
+		models.FreePorts(host.ID, hostPorts)
+		notifyError(ctx, gameID, players, "internal error")
 		return err
 	}
 
-	// Notify all players that the match has started
+	match, err := models.MatchStarted(gameID, si.ID, authToken, players)
+	if err != nil {
+		slog.Error("Failed to create match record", "error", err)
+		models.SetServerInstanceStatus(si.ID, models.ServerInstanceStatusDeleted)
+		hetzner.StopContainer(context.Background(), host.PublicIP, host.AgentPort, host.AgentToken, containerID)
+		models.FreePorts(host.ID, hostPorts)
+		notifyError(ctx, gameID, players, "internal error")
+		return err
+	}
+
 	for _, player := range players {
 		server.S.Redis.PublishMatchReady(ctx, gameID, player, "match_"+match.ID)
 	}
@@ -152,6 +240,8 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 	return nil
 }
 
+// PairPlayers walks every queue (including metadata-segmented sub-queues)
+// and pairs LobbySize players together, dispatching them via StartMatch.
 func PairPlayers(ctx context.Context) error {
 	keys, err := server.S.Redis.AllQueues(ctx)
 	if err != nil {
@@ -181,19 +271,19 @@ func PairPlayers(ctx context.Context) error {
 			slog.Error("Failed to get queue size", "error", err, "queueID", queueID)
 			continue
 		}
-
 		slog.Debug("Pairing players", "queueID", queueID, "queueSize", qs)
+
 		for queueSize, err := server.S.Redis.GameQueueSize(ctx, queueID); err == nil && queueSize >= int64(game.LobbySize); queueSize, err = server.S.Redis.GameQueueSize(ctx, queueID) {
 			players, err := server.S.Redis.PopPlayersFromQueue(ctx, queueID, game.LobbySize)
 			if err != nil {
 				slog.Error("Failed to pop players from queue", "error", err, "queueID", queueID)
-				continue
+				break
 			}
 
 			if len(players) < game.LobbySize {
 				server.S.Redis.PushPlayersToQueue(ctx, queueID, players)
 				slog.Info("Not enough players, putting them back in queue", "queueID", queueID, "players", players)
-				continue
+				break
 			}
 
 			if err := StartMatch(ctx, gameID, game, players); err != nil {

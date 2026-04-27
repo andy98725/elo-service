@@ -50,16 +50,38 @@ func migrateForSQLite(db *gorm.DB) error {
 		`CREATE TABLE IF NOT EXISTS matches (
 			id TEXT PRIMARY KEY,
 			game_id TEXT NOT NULL,
-			machine_name TEXT,
-			machine_id INTEGER,
-			machine_ip TEXT,
-			machine_logs_port INTEGER,
+			server_instance_id TEXT,
 			guest_ids TEXT DEFAULT '{}',
 			auth_code TEXT NOT NULL,
 			status TEXT NOT NULL,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			FOREIGN KEY (game_id) REFERENCES games(id)
+			FOREIGN KEY (game_id) REFERENCES games(id),
+			FOREIGN KEY (server_instance_id) REFERENCES server_instances(id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS machine_hosts (
+			id TEXT PRIMARY KEY,
+			provider_id TEXT NOT NULL UNIQUE,
+			public_ip TEXT NOT NULL,
+			agent_port INTEGER NOT NULL,
+			agent_token TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'provisioning',
+			max_slots INTEGER NOT NULL,
+			allocated_ports TEXT NOT NULL DEFAULT '{}',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS server_instances (
+			id TEXT PRIMARY KEY,
+			machine_host_id TEXT NOT NULL,
+			container_id TEXT NOT NULL,
+			auth_code TEXT NOT NULL,
+			game_ports TEXT NOT NULL DEFAULT '{}',
+			host_ports TEXT NOT NULL DEFAULT '{}',
+			status TEXT NOT NULL DEFAULT 'starting',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (machine_host_id) REFERENCES machine_hosts(id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS match_players (
 			match_id TEXT,
@@ -125,6 +147,7 @@ func assertSchemaMatchesModels(db *gorm.DB) error {
 	checks := []interface{}{
 		&models.User{}, &models.Game{}, &models.Match{},
 		&models.MatchResult{}, &models.Rating{},
+		&models.MachineHost{}, &models.ServerInstance{},
 	}
 	for _, m := range checks {
 		s, err := schema.Parse(m, cache, ns)

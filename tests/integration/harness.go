@@ -74,6 +74,15 @@ func NewHarness(t *testing.T) *Harness {
 			MatchmakingPairingMinInterval: 10 * time.Millisecond,
 			MatchmakingGCMinInterval:      10 * time.Millisecond,
 			Endpoint:                      "http://localhost",
+			// Host-pool sizing. Numbers are tight so tests can exercise the
+			// "create new host" path quickly, but high enough that no real
+			// scenario hits the cap.
+			HCLOUDMaxHosts:        4,
+			HCLOUDMaxSlotsPerHost: 4,
+			HCLOUDPortRangeStart:  10000,
+			HCLOUDPortRangeEnd:    11000,
+			HCLOUDAgentPort:       8080,
+			HCLOUDHostType:        "cx23",
 		},
 		Logger:   slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 		DB:       db,

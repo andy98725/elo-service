@@ -97,8 +97,8 @@ func TestReportMatchResult(t *testing.T) {
 		t.Fatalf("expected message in response, got %+v", resp)
 	}
 
-	if h.Machines.ActiveServers() != 0 {
-		t.Errorf("expected 0 active servers after match end, got %d", h.Machines.ActiveServers())
+	if h.Machines.ActiveContainers() != 0 {
+		t.Errorf("expected 0 active containers after match end, got %d", h.Machines.ActiveContainers())
 	}
 
 	resultsResp := DoReq(t, "GET", fmt.Sprintf("%s/game/%s/results", h.BaseURL(), gameID), nil, g1Token, http.StatusOK)
@@ -194,8 +194,8 @@ func TestGarbageCollectTimedOutMatch(t *testing.T) {
 		t.Errorf("expected 0 started matches after GC, got %d", len(remaining))
 	}
 
-	if h.Machines.ActiveServers() != 0 {
-		t.Errorf("expected 0 active servers after GC, got %d", h.Machines.ActiveServers())
+	if h.Machines.ActiveContainers() != 0 {
+		t.Errorf("expected 0 active containers after GC, got %d", h.Machines.ActiveContainers())
 	}
 }
 

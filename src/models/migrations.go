@@ -32,11 +32,34 @@ func Migrate() error {
 				return nil
 			},
 		},
+		{
+			ID: "host_pool",
+			Migrate: func(tx *gorm.DB) error {
+				tx.Exec(`SELECT pg_advisory_lock(42)`)
+				defer tx.Exec(`SELECT pg_advisory_unlock(42)`)
+
+				if err := tx.AutoMigrate(&MachineHost{}, &ServerInstance{}); err != nil {
+					return err
+				}
+
+				// Drop the old per-match machine columns from matches.
+				for _, col := range []string{"machine_id", "machine_ip", "machine_logs_port"} {
+					if tx.Migrator().HasColumn(&Match{}, col) {
+						if err := tx.Migrator().DropColumn(&Match{}, col); err != nil {
+							return err
+						}
+					}
+				}
+
+				return nil
+			},
+		},
 	})
+
 	if err := m.Migrate(); err != nil {
 		return err
 	}
-	if err := server.S.DB.AutoMigrate(&User{}, &Game{}, &Match{}, &MatchResult{}); err != nil {
+	if err := server.S.DB.AutoMigrate(&User{}, &Game{}, &Match{}, &MatchResult{}, &MachineHost{}, &ServerInstance{}); err != nil {
 		return err
 	}
 

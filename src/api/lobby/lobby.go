@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -335,7 +336,12 @@ func handleMatchReady(ctx echo.Context, conn *websocket.Conn, payload string) {
 	}
 
 	conn.WriteJSON(echo.Map{"status": "server_starting", "message": "Match found, waiting for server to start..."})
-	ready, err := util.WaitUntilServerReady(ctx.Request().Context(), match.MachineIP, match.MachineLogsPort, server.S.Shutdown)
+
+	healthURL := fmt.Sprintf("http://%s:%d/containers/%s/health",
+		match.ServerInstance.MachineHost.PublicIP,
+		match.ServerInstance.MachineHost.AgentPort,
+		match.ServerInstance.ContainerID)
+	ready, err := util.WaitUntilServerReady(ctx.Request().Context(), healthURL, server.S.Shutdown)
 	if err != nil {
 		conn.WriteJSON(echo.Map{"status": "error", "error": err.Error()})
 		return
@@ -344,7 +350,14 @@ func handleMatchReady(ctx echo.Context, conn *websocket.Conn, payload string) {
 		conn.WriteJSON(echo.Map{"status": "error", "error": "server not ready"})
 		return
 	}
-	conn.WriteJSON(echo.Map{"status": "match_found", "server_address": match.ConnectionAddress()})
+	// Match the matchmaking flow's wire format: server_host + server_ports +
+	// match_id, no auth_code (player IDs are the join key on the game server).
+	conn.WriteJSON(echo.Map{
+		"status":       "match_found",
+		"server_host":  match.ServerInstance.MachineHost.PublicIP,
+		"server_ports": []int64(match.ServerInstance.HostPorts),
+		"match_id":     match.ID,
+	})
 }
 
 func lobbyTTLRefresh(ctx context.Context, lobbyID, playerID string) chan struct{} {

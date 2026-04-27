@@ -20,6 +20,13 @@ type Config struct {
 	RedisURL                      string
 	DatabaseURL                   string
 	HCLOUDToken                   string
+	HCLOUDHostType                string
+	HCLOUDMaxHosts                int
+	HCLOUDMaxSlotsPerHost         int
+	HCLOUDWarmSlots               int
+	HCLOUDAgentPort               int64
+	HCLOUDPortRangeStart          int64
+	HCLOUDPortRangeEnd            int64
 	AWSAccessKeyID                string
 	AWSSecretAccessKey            string
 	AWSRegion                     string
@@ -76,6 +83,52 @@ func InitConfig() (*Config, error) {
 
 	if cfg.HCLOUDToken = os.Getenv("HCLOUD_TOKEN"); cfg.HCLOUDToken == "" {
 		return nil, fmt.Errorf("HCLOUD_TOKEN is not set")
+	}
+
+	if cfg.HCLOUDHostType = os.Getenv("HCLOUD_HOST_TYPE"); cfg.HCLOUDHostType == "" {
+		cfg.HCLOUDHostType = "cx33"
+	}
+
+	cfg.HCLOUDMaxHosts = 5
+	if v := os.Getenv("HCLOUD_MAX_HOSTS"); v != "" {
+		if n, err := fmt.Sscanf(v, "%d", &cfg.HCLOUDMaxHosts); n != 1 || err != nil {
+			return nil, fmt.Errorf("HCLOUD_MAX_HOSTS must be an integer")
+		}
+	}
+
+	cfg.HCLOUDMaxSlotsPerHost = 8
+	if v := os.Getenv("HCLOUD_MAX_SLOTS_PER_HOST"); v != "" {
+		if n, err := fmt.Sscanf(v, "%d", &cfg.HCLOUDMaxSlotsPerHost); n != 1 || err != nil {
+			return nil, fmt.Errorf("HCLOUD_MAX_SLOTS_PER_HOST must be an integer")
+		}
+	}
+
+	cfg.HCLOUDWarmSlots = 0
+	if v := os.Getenv("HCLOUD_WARM_SLOTS"); v != "" {
+		if n, err := fmt.Sscanf(v, "%d", &cfg.HCLOUDWarmSlots); n != 1 || err != nil {
+			return nil, fmt.Errorf("HCLOUD_WARM_SLOTS must be an integer")
+		}
+	}
+
+	cfg.HCLOUDAgentPort = 8080
+	if v := os.Getenv("HCLOUD_AGENT_PORT"); v != "" {
+		if n, err := fmt.Sscanf(v, "%d", &cfg.HCLOUDAgentPort); n != 1 || err != nil {
+			return nil, fmt.Errorf("HCLOUD_AGENT_PORT must be an integer")
+		}
+	}
+
+	cfg.HCLOUDPortRangeStart = 7000
+	if v := os.Getenv("HCLOUD_PORT_RANGE_START"); v != "" {
+		if n, err := fmt.Sscanf(v, "%d", &cfg.HCLOUDPortRangeStart); n != 1 || err != nil {
+			return nil, fmt.Errorf("HCLOUD_PORT_RANGE_START must be an integer")
+		}
+	}
+
+	cfg.HCLOUDPortRangeEnd = 9000
+	if v := os.Getenv("HCLOUD_PORT_RANGE_END"); v != "" {
+		if n, err := fmt.Sscanf(v, "%d", &cfg.HCLOUDPortRangeEnd); n != 1 || err != nil {
+			return nil, fmt.Errorf("HCLOUD_PORT_RANGE_END must be an integer")
+		}
 	}
 
 	if cfg.AWSAccessKeyID = os.Getenv("AWS_ACCESS_KEY_ID"); cfg.AWSAccessKeyID == "" {

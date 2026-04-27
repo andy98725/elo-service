@@ -27,6 +27,11 @@ func RunWorker(ctx context.Context, shutdown chan struct{}) {
 	server.S.Redis.PublishMatchmakingTrigger(ctx)
 	server.S.Redis.PublishGarbageCollectionTrigger(ctx)
 
+	// Bring warm pool up to target on startup (blocks until VMs are ready)
+	if err := matchmaking.MaintainWarmPool(ctx); err != nil {
+		slog.Error("Failed to maintain warm pool on startup", "error", err)
+	}
+
 	// TODO: Bump go version and use "golang.org/x/time/rate" package
 	var lastPairing, lastGC time.Time
 	runPairing := func() {
@@ -50,6 +55,9 @@ func RunWorker(ctx context.Context, shutdown chan struct{}) {
 		}
 		if err := matchmaking.CleanupExpiredPlayers(ctx); err != nil {
 			slog.Error("Failed to cleanup expired players", "error", err)
+		}
+		if err := matchmaking.MaintainWarmPool(ctx); err != nil {
+			slog.Error("Failed to maintain warm pool", "error", err)
 		}
 		if err := matchmaking.CleanupExpiredLobbies(ctx); err != nil {
 			slog.Error("Failed to cleanup expired lobbies", "error", err)

@@ -119,8 +119,8 @@ func TestMatchPairingTwoGuests(t *testing.T) {
 			status := resp["status"].(string)
 			switch status {
 			case "match_found":
-				addr, _ := resp["server_address"].(string)
-				results <- wsResult{name: name, status: status, address: addr}
+				host, _ := resp["server_host"].(string)
+				results <- wsResult{name: name, status: status, address: host}
 				return
 			case "server_starting", "searching":
 				continue
@@ -151,8 +151,8 @@ func TestMatchPairingTwoGuests(t *testing.T) {
 		t.Errorf("expected same server address, got %s and %s", r1.address, r2.address)
 	}
 
-	if h.Machines.ActiveServers() != 1 {
-		t.Errorf("expected 1 active server, got %d", h.Machines.ActiveServers())
+	if h.Machines.ActiveContainers() != 1 {
+		t.Errorf("expected 1 active container, got %d", h.Machines.ActiveContainers())
 	}
 }
 
@@ -209,7 +209,8 @@ func TestThreePlayerLobby(t *testing.T) {
 			var resp map[string]interface{}
 			json.Unmarshal(msg, &resp)
 			if resp["status"] == "match_found" {
-				results <- resp["server_address"].(string)
+				host, _ := resp["server_host"].(string)
+				results <- host
 				return
 			}
 		}
