@@ -56,7 +56,11 @@ func (m *Match) ConnectionAddress() string {
 	return m.ServerInstance.MachineHost.PublicIP
 }
 
-func MatchStarted(gameID string, serverInstanceID string, authCode string, playerIDs []string) (*Match, error) {
+// MatchStarted writes a new Match row using the supplied db handle. Pass
+// a transaction so the match row commits atomically with its referenced
+// ServerInstance — see CreateServerInstance for the failure mode this
+// guards against.
+func MatchStarted(db *gorm.DB, gameID string, serverInstanceID string, authCode string, playerIDs []string) (*Match, error) {
 	var users []User
 	var guestIDs []string
 
@@ -77,7 +81,7 @@ func MatchStarted(gameID string, serverInstanceID string, authCode string, playe
 		Status:           "started",
 	}
 
-	if err := server.S.DB.Create(match).Error; err != nil {
+	if err := db.Create(match).Error; err != nil {
 		return nil, err
 	}
 

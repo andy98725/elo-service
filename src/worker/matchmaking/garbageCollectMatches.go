@@ -16,6 +16,43 @@ const (
 	GC_PAGE_SIZE       = 100
 )
 
+// ReconcileOrphanedInstances marks ServerInstance rows deleted when their
+// MachineHost has already been marked deleted. Such rows can otherwise sit
+// at status='starting' indefinitely — match-driven GC works through the
+// Match → SI → Host chain, so once the host row is buried the SI never
+// gets touched. This sweep closes that gap by walking from the SI side.
+//
+// Best-effort: we don't try to reach the host agent (its VM is gone), and
+// we log-and-continue on individual update failures so one bad row doesn't
+// stall the rest of the sweep.
+func ReconcileOrphanedInstances(ctx context.Context) error {
+	var orphans []models.ServerInstance
+	if err := server.S.DB.
+		Joins("JOIN machine_hosts mh ON mh.id = server_instances.machine_host_id").
+		Where("server_instances.status != ?", models.ServerInstanceStatusDeleted).
+		Where("mh.status = ?", models.MachineHostStatusDeleted).
+		Find(&orphans).Error; err != nil {
+		return err
+	}
+
+	for _, si := range orphans {
+		slog.Info("Reconciling orphaned server instance (host deleted)",
+			"instanceID", si.ID, "hostID", si.MachineHostID)
+
+		if err := models.FreePorts(si.MachineHostID, []int64(si.HostPorts)); err != nil {
+			slog.Warn("Failed to free ports for orphaned instance",
+				"error", err, "instanceID", si.ID, "hostID", si.MachineHostID)
+		}
+
+		if err := models.SetServerInstanceStatus(si.ID, models.ServerInstanceStatusDeleted); err != nil {
+			slog.Error("Failed to mark orphaned instance deleted",
+				"error", err, "instanceID", si.ID)
+		}
+	}
+
+	return nil
+}
+
 func GarbageCollectMatches(ctx context.Context) error {
 	var matches []models.Match
 	var nextPage int

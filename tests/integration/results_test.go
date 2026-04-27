@@ -199,6 +199,42 @@ func TestGarbageCollectTimedOutMatch(t *testing.T) {
 	}
 }
 
+func TestReconcileOrphanedInstances(t *testing.T) {
+	h := NewHarness(t)
+	_, _, _, _, _, _ = setupMatchedGame(t, h)
+
+	var si models.ServerInstance
+	if err := server.S.DB.Where("status = ?", models.ServerInstanceStatusStarting).First(&si).Error; err != nil {
+		t.Fatalf("no starting server instance found: %v", err)
+	}
+
+	if err := server.S.DB.Model(&models.MachineHost{}).
+		Where("id = ?", si.MachineHostID).
+		Update("status", models.MachineHostStatusDeleted).Error; err != nil {
+		t.Fatalf("failed to mark host deleted: %v", err)
+	}
+
+	if err := matchmaking.ReconcileOrphanedInstances(context.Background()); err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+
+	var refreshed models.ServerInstance
+	if err := server.S.DB.First(&refreshed, "id = ?", si.ID).Error; err != nil {
+		t.Fatalf("failed to reload SI: %v", err)
+	}
+	if refreshed.Status != models.ServerInstanceStatusDeleted {
+		t.Errorf("expected SI status=%q, got %q", models.ServerInstanceStatusDeleted, refreshed.Status)
+	}
+
+	var host models.MachineHost
+	if err := server.S.DB.First(&host, "id = ?", si.MachineHostID).Error; err != nil {
+		t.Fatalf("failed to reload host: %v", err)
+	}
+	if len(host.AllocatedPorts) != 0 {
+		t.Errorf("expected ports freed on orphaned host, got %v", host.AllocatedPorts)
+	}
+}
+
 func TestMatchResultVisibility(t *testing.T) {
 	h := NewHarness(t)
 	gameID, g1Token, _, _, _, authCode := setupMatchedGame(t, h)

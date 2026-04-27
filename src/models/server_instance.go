@@ -5,6 +5,7 @@ import (
 
 	"github.com/andy98725/elo-service/src/server"
 	"github.com/lib/pq"
+	"gorm.io/gorm"
 )
 
 const (
@@ -25,7 +26,12 @@ type ServerInstance struct {
 	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
-func CreateServerInstance(machineHostID, containerID, authCode string, gamePorts, hostPorts []int64) (*ServerInstance, error) {
+// CreateServerInstance writes a new ServerInstance row using the supplied
+// db handle. Pass a transaction (server.S.DB.Transaction's tx) when the row
+// must be created atomically with sibling writes — most importantly the
+// Match row in StartMatch — so a partial failure rolls back instead of
+// stranding a "starting" instance with no match referencing it.
+func CreateServerInstance(db *gorm.DB, machineHostID, containerID, authCode string, gamePorts, hostPorts []int64) (*ServerInstance, error) {
 	si := &ServerInstance{
 		MachineHostID: machineHostID,
 		ContainerID:   containerID,
@@ -34,7 +40,7 @@ func CreateServerInstance(machineHostID, containerID, authCode string, gamePorts
 		HostPorts:     pq.Int64Array(hostPorts),
 		Status:        ServerInstanceStatusStarting,
 	}
-	if err := server.S.DB.Create(si).Error; err != nil {
+	if err := db.Create(si).Error; err != nil {
 		return nil, err
 	}
 	return si, nil

@@ -12,6 +12,7 @@ import (
 	extRedis "github.com/andy98725/elo-service/src/external/redis"
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
+	"gorm.io/gorm"
 )
 
 const (
@@ -225,19 +226,23 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 		return err
 	}
 
-	si, err := models.CreateServerInstance(host.ID, containerID, authToken, gamePorts, hostPorts)
-	if err != nil {
-		slog.Error("Failed to save server instance", "error", err)
-		hetzner.StopContainer(context.Background(), host.PublicIP, host.AgentPort, host.AgentToken, containerID)
-		models.FreePorts(host.ID, hostPorts)
-		notifyError(ctx, gameID, players, "internal error")
-		return err
-	}
-
-	match, err := models.MatchStarted(gameID, si.ID, authToken, players)
-	if err != nil {
-		slog.Error("Failed to create match record", "error", err)
-		models.SetServerInstanceStatus(si.ID, models.ServerInstanceStatusDeleted)
+	// Persist the ServerInstance and Match atomically. A crash between the
+	// two writes (process kill, panic, fly machine restart) would otherwise
+	// leave a "starting" SI with no Match referencing it — invisible to
+	// match-driven GC and stranded forever.
+	var match *models.Match
+	if err := server.S.DB.Transaction(func(tx *gorm.DB) error {
+		si, err := models.CreateServerInstance(tx, host.ID, containerID, authToken, gamePorts, hostPorts)
+		if err != nil {
+			return fmt.Errorf("create server instance: %w", err)
+		}
+		match, err = models.MatchStarted(tx, gameID, si.ID, authToken, players)
+		if err != nil {
+			return fmt.Errorf("create match: %w", err)
+		}
+		return nil
+	}); err != nil {
+		slog.Error("Failed to persist server instance/match", "error", err)
 		hetzner.StopContainer(context.Background(), host.PublicIP, host.AgentPort, host.AgentToken, containerID)
 		models.FreePorts(host.ID, hostPorts)
 		notifyError(ctx, gameID, players, "internal error")

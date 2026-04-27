@@ -53,6 +53,9 @@ func RunWorker(ctx context.Context, shutdown chan struct{}) {
 		if err := matchmaking.GarbageCollectMatches(ctx); err != nil {
 			slog.Error("Failed to garbage collect matches", "error", err)
 		}
+		if err := matchmaking.ReconcileOrphanedInstances(ctx); err != nil {
+			slog.Error("Failed to reconcile orphaned instances", "error", err)
+		}
 		if err := matchmaking.CleanupExpiredPlayers(ctx); err != nil {
 			slog.Error("Failed to cleanup expired players", "error", err)
 		}
