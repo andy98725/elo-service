@@ -216,6 +216,127 @@ func TestLobbyCapacityIsAtomic(t *testing.T) {
 	}
 }
 
+// TestLobbyDisconnectCommandPlayer verifies a non-host player can leave a
+// lobby cleanly by sending "/disconnect" and that other members observe a
+// player_leave with reason="left".
+func TestLobbyDisconnectCommandPlayer(t *testing.T) {
+	h := NewHarness(t)
+
+	RegisterUser(t, h.BaseURL(), "ldpowner", "ldpowner@example.com", "pass")
+	ownerToken, _ := LoginUser(t, h.BaseURL(), "ldpowner@example.com", "pass")
+	game := CreateGame(t, h.BaseURL(), ownerToken, "LobbyDisconnectGame", 3)
+	gameID := game["id"].(string)
+
+	hostToken, _ := GuestLogin(t, h.BaseURL(), "ldphost")
+	hostWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/host?gameID=%s", h.BaseURL(), gameID), hostToken)
+	defer hostWS.Close()
+	hostHello := readJSONMsg(t, hostWS, 3*time.Second)
+	lobbyID := hostHello["lobby_id"].(string)
+
+	joinerToken, _ := GuestLogin(t, h.BaseURL(), "ldpjoiner")
+	joinerWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/join?lobbyID=%s", h.BaseURL(), lobbyID), joinerToken)
+	defer joinerWS.Close()
+	readJSONMsg(t, joinerWS, 3*time.Second) // lobby_joined
+
+	// Host should observe the join before the joiner leaves.
+	if ev := readEventOnLobby(hostWS, "player_join", 3*time.Second); ev == nil {
+		t.Fatal("host did not observe player_join")
+	}
+
+	if err := joinerWS.WriteMessage(websocket.TextMessage, []byte("/disconnect")); err != nil {
+		t.Fatalf("failed to send /disconnect: %v", err)
+	}
+
+	joinerWS.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		_, msg, err := joinerWS.ReadMessage()
+		if err != nil {
+			t.Fatalf("joiner did not see disconnected ack: %v", err)
+		}
+		var resp map[string]interface{}
+		json.Unmarshal(msg, &resp)
+		if resp["status"] == "disconnected" {
+			break
+		}
+	}
+
+	leave := readEventOnLobby(hostWS, "player_leave", 3*time.Second)
+	if leave == nil {
+		t.Fatal("host did not observe player_leave after joiner /disconnect")
+	}
+	if leave["reason"] != "left" {
+		t.Errorf("expected reason=left, got %v", leave["reason"])
+	}
+	if leave["name"] != "ldpjoiner" {
+		t.Errorf("expected leaving name=ldpjoiner, got %v", leave["name"])
+	}
+}
+
+// TestLobbyDisconnectCommandHost verifies a bare "/disconnect" from the
+// host tears the lobby down (same outcome as the host closing the WS).
+func TestLobbyDisconnectCommandHost(t *testing.T) {
+	h := NewHarness(t)
+
+	RegisterUser(t, h.BaseURL(), "ldhowner", "ldhowner@example.com", "pass")
+	ownerToken, _ := LoginUser(t, h.BaseURL(), "ldhowner@example.com", "pass")
+	game := CreateGame(t, h.BaseURL(), ownerToken, "LobbyHostDisconnectGame", 3)
+	gameID := game["id"].(string)
+
+	hostToken, _ := GuestLogin(t, h.BaseURL(), "ldhhost")
+	hostWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/host?gameID=%s", h.BaseURL(), gameID), hostToken)
+	defer hostWS.Close()
+	hostHello := readJSONMsg(t, hostWS, 3*time.Second)
+	lobbyID := hostHello["lobby_id"].(string)
+
+	joinerToken, _ := GuestLogin(t, h.BaseURL(), "ldhjoiner")
+	joinerWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/join?lobbyID=%s", h.BaseURL(), lobbyID), joinerToken)
+	defer joinerWS.Close()
+	readJSONMsg(t, joinerWS, 3*time.Second) // lobby_joined
+	if ev := readEventOnLobby(hostWS, "player_join", 3*time.Second); ev == nil {
+		t.Fatal("host did not observe player_join")
+	}
+
+	if err := hostWS.WriteMessage(websocket.TextMessage, []byte("/disconnect")); err != nil {
+		t.Fatalf("failed to send host /disconnect: %v", err)
+	}
+
+	// Host gets {"status":"disconnected"} ack.
+	hostWS.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		_, msg, err := hostWS.ReadMessage()
+		if err != nil {
+			t.Fatalf("host did not see disconnected ack: %v", err)
+		}
+		var resp map[string]interface{}
+		json.Unmarshal(msg, &resp)
+		if resp["status"] == "disconnected" {
+			break
+		}
+	}
+
+	// Joiner observes player_leave with reason=host_left as the lobby is
+	// torn down.
+	leave := readEventOnLobby(joinerWS, "player_leave", 3*time.Second)
+	if leave == nil {
+		t.Fatal("joiner did not observe host's player_leave")
+	}
+	if leave["reason"] != "host_left" {
+		t.Errorf("expected reason=host_left, got %v", leave["reason"])
+	}
+
+	// The lobby record itself should be gone.
+	findResp := DoReq(t, "GET",
+		fmt.Sprintf("%s/lobby/find?gameID=%s", h.BaseURL(), gameID),
+		nil, joinerToken, http.StatusOK)
+	if lobbies, _ := findResp["lobbies"].([]interface{}); len(lobbies) != 0 {
+		t.Errorf("expected lobby torn down after host /disconnect, find returned %v", lobbies)
+	}
+}
+
 func toWS(httpURL string) string {
 	if strings.HasPrefix(httpURL, "https://") {
 		return "wss://" + strings.TrimPrefix(httpURL, "https://")

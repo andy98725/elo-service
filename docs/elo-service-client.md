@@ -196,6 +196,42 @@ Common error reasons, by phase:
 
 You don't need to do anything — the server refreshes the queue TTL for you while the WS stays open. **Just keep the socket open** until you get `match_found` or `error`. Closing the WS removes you from the queue (eventually, via TTL expiry).
 
+### Leaving the queue (/disconnect)
+
+To leave the queue cleanly without waiting for TTL cleanup, send a single text frame:
+
+```
+/disconnect
+```
+
+The server responds with `{"status": "disconnected"}`, removes you from the queue immediately, and closes the WebSocket. This is preferable to just closing the socket: TCP close removes you only on the next GC sweep (up to ~3 minutes later), while `/disconnect` is synchronous.
+
+### WebSocket keepalive (Ping/Pong)
+
+The matchmaking and lobby WSes both run server-driven keepalive: the server sends an [RFC 6455 Ping control frame](https://datatracker.ietf.org/doc/html/rfc6455#section-5.5.2) every **30 seconds** and expects a Pong back within **75 seconds**. This is independent of the JSON `{"status": "searching"}` heartbeat — pings are at the WS protocol layer, not application messages.
+
+If you're using one of these, **you don't need to do anything** — they reply to pings automatically:
+
+- Browser `WebSocket` (web / WebGL clients)
+- Go: `github.com/gorilla/websocket` (default `PongHandler`)
+- Node.js `ws`
+- Most C# / Unity / Unreal `WebSocket` libraries
+- Python `websockets`
+
+If you're using a low-level WS library that **doesn't** auto-reply to ping frames, you must register a Ping handler that writes a Pong frame back. Check your library's docs for "ping handler" or "control frame".
+
+#### Rollout timeline (action required for some clients)
+
+The server is currently in **soft mode**: it sends pings and tracks pong arrivals, but clients that don't pong are *not* disconnected — the server only logs a warning. This grace period lets existing clients keep working while teams ship updates.
+
+**A future server release will flip to hard mode.** Once that happens, any WS that misses pongs for 75 s gets closed by the server with a normal WS close frame; reconnect to rejoin the queue.
+
+What to do **now**:
+
+1. Verify your client library replies to WS pings automatically (see list above).
+2. If it doesn't, wire up a ping handler that responds with a Pong.
+3. If you tunnel the WS through a proxy or framework that strips control frames, fix that — the connection will start dropping once hard mode lands.
+
 ### Connecting to the spawned game server
 
 Once you have `match_found`, build the connection URL using `server_host` and the appropriate index of `server_ports`. **The protocol depends on whether you're a browser or a native client.**
@@ -376,6 +412,10 @@ Upgrades to WebSocket.
 // "kicked_by_host" — there's no host-supplied message attached.
 { "status": "kicked", "reason": "kicked_by_host" }
 
+// Acknowledgment that the server processed your /disconnect. The WS
+// closes immediately after this frame.
+{ "status": "disconnected" }
+
 // Any error.
 { "status": "error", "error": "<reason>" }
 ```
@@ -388,7 +428,16 @@ Send a plain-text WS frame (not JSON, no leading `/`) and it gets broadcast as c
 hello everyone
 ```
 
-Becomes a `player_say` event for everyone in the lobby (including the sender). If a non-host sends a frame that *does* start with `/` (e.g. `/start`), it's still treated as chat — the literal text including the slash is broadcast in `player_say.message`. Host commands only take effect on the host's connection.
+Becomes a `player_say` event for everyone in the lobby (including the sender). If a non-host sends a frame that *does* start with `/` (e.g. `/start`), it's still treated as chat — the literal text including the slash is broadcast in `player_say.message`. The exception is `/disconnect` (see below). Host commands only take effect on the host's connection.
+
+### Leaving a lobby (/disconnect)
+
+Either side — host or player — can send a single bare `/disconnect` text frame to leave cleanly. The server responds with `{"status": "disconnected"}` and closes the WebSocket. Other lobby members receive a `player_leave` event:
+
+- Player leaves: `{"event": "player_leave", "id": "…", "name": "…", "reason": "left"}`.
+- Host leaves: `{"event": "player_leave", "id": "…", "name": "…", "reason": "host_left"}` and the lobby is torn down — every other connection receives that frame too and the WS will close shortly after.
+
+This is the same outcome as closing the WS, but explicit; it's the recommended way to leave when your UI offers a "Leave lobby" button.
 
 ### Host commands
 
@@ -396,6 +445,7 @@ The host's WS accepts text commands prefixed with `/`:
 
 | Command | Effect |
 |---|---|
+| `/disconnect` | (No arg.) Host leaves the lobby, which tears it down. See "Leaving a lobby" above. |
 | `/disconnect <player_name>` | Kick the named player (lookup is by display name, not ID). They get `{"status": "kicked", "reason": "kicked_by_host"}`, and everyone else gets `player_leave` with `reason: "kicked"`. The host can't kick themselves. |
 | `/start` | Create a match with the current set of players, spawn the game server, and broadcast the `match_found` payload to every connected player. The lobby closes after this. **No minimum player count is enforced** — the host can /start with any number of players (even 1), so check the lobby is at capacity before firing if your game requires it. |
 

@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/andy98725/elo-service/src/api/wsliveness"
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
 	"github.com/andy98725/elo-service/src/util"
@@ -67,20 +69,64 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 
 	// Start TTL refresh goroutine using the same queue ID the player joined
 	ttlChan := ttlRefresh(ctx.Request().Context(), joinResult.QueueID, id)
+	defer close(*ttlChan)
 
 	// Send searching status every 5 seconds
 	status := "searching"
 	statusChan := statusRefresh(ctx.Request().Context(), conn, &status)
 	defer close(*statusChan)
 
+	// Drive WS keepalive so half-open peers (sleeping laptops, NAT drops)
+	// are detected promptly instead of sitting in queue until the Redis
+	// TTL key expires. The read pump below dispatches Pong frames into
+	// the handler installed here.
+	livenessStop := wsliveness.Install(conn, "match/join", id)
+	defer close(livenessStop)
+
+	// Read pump: forward inbound text frames to a buffered channel and let
+	// gorilla/websocket process control frames (Pong, Close) inline. Closes
+	// peerGone on any read error so the handler tears down promptly when
+	// the client disconnects (or the read deadline fires in hard mode).
+	peerGone := make(chan struct{})
+	inbound := make(chan string, 4)
+	go func() {
+		defer close(peerGone)
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			text := strings.TrimSpace(string(msg))
+			if text == "" {
+				continue
+			}
+			select {
+			case inbound <- text:
+			default:
+				// Buffer full — the only command currently honored on
+				// /match/join is /disconnect, so don't block the read pump
+				// (and the Pong dispatch it carries) on a chatty client.
+			}
+		}
+	}()
+
 	// Queue is joined, now we need to wait for the match to start
 	conn.WriteJSON(echo.Map{"status": "queue_joined", "players_in_queue": joinResult.QueueSize})
 
 	for {
 		select {
+		case text := <-inbound:
+			if text == "/disconnect" {
+				if err := server.S.Redis.RemovePlayerFromQueue(ctx.Request().Context(), joinResult.QueueID, id); err != nil {
+					slog.Warn("Failed to remove player from queue on /disconnect",
+						"error", err, "playerID", id, "queueID", joinResult.QueueID)
+				}
+				conn.WriteJSON(echo.Map{"status": "disconnected"})
+				return nil
+			}
+			// Unknown commands are silently ignored to leave room for
+			// future additions without breaking older clients.
 		case resp := <-readyChan:
-			close(*ttlChan)
-
 			if resp.Error != nil {
 				conn.WriteJSON(echo.Map{"status": "error", "error": resp.Error.Error()})
 				return nil
@@ -118,11 +164,11 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 				"match_id":     match.ID,
 			})
 			return nil
+		case <-peerGone:
+			return nil
 		case <-ctx.Request().Context().Done():
-			close(*ttlChan)
 			return nil
 		case <-server.S.Shutdown:
-			close(*ttlChan)
 			return nil
 		}
 	}

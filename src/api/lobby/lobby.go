@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/andy98725/elo-service/src/api/wsliveness"
 	"github.com/andy98725/elo-service/src/external/redis"
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
@@ -193,6 +194,15 @@ func runLobbySession(
 	ttlChan := lobbyTTLRefresh(reqCtx, rec.ID, playerID)
 	defer close(ttlChan)
 
+	// Drive WS keepalive (Pings + soft/hard pong-grace check). The read pump
+	// below dispatches Pong frames into the handler installed here.
+	label := "lobby/join"
+	if isHost {
+		label = "lobby/host"
+	}
+	livenessStop := wsliveness.Install(conn, label, playerID)
+	defer close(livenessStop)
+
 	inbound := make(chan string, 8)
 	readErr := make(chan error, 1)
 	go func() {
@@ -229,7 +239,10 @@ func runLobbySession(
 			if text == "" {
 				continue
 			}
-			handleInbound(reqCtx, rec, game, playerID, playerName, isHost, text)
+			if handleInbound(reqCtx, rec, game, playerID, playerName, isHost, text) {
+				conn.WriteJSON(echo.Map{"status": "disconnected"})
+				return
+			}
 		case <-readErr:
 			return
 		case <-reqCtx.Done():
@@ -240,6 +253,10 @@ func runLobbySession(
 	}
 }
 
+// handleInbound returns true if the caller should exit the lobby session
+// (i.e. the client requested self-disconnect via the bare /disconnect
+// command). The host's parametric /disconnect <name> command is still
+// handled inside runHostCommand and does not exit the host's own session.
 func handleInbound(
 	ctx context.Context,
 	rec *redis.LobbyRecord,
@@ -247,10 +264,13 @@ func handleInbound(
 	playerID, playerName string,
 	isHost bool,
 	text string,
-) {
+) bool {
+	if text == "/disconnect" {
+		return true
+	}
 	if isHost && strings.HasPrefix(text, "/") {
 		runHostCommand(ctx, rec, game, text)
-		return
+		return false
 	}
 	server.S.Redis.PublishLobbyEvent(ctx, rec.ID, mustJSON(lobbyEvent{
 		Event:   "player_say",
@@ -258,6 +278,7 @@ func handleInbound(
 		Name:    playerName,
 		Message: text,
 	}))
+	return false
 }
 
 func runHostCommand(ctx context.Context, rec *redis.LobbyRecord, game *models.Game, text string) {

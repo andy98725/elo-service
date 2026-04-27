@@ -42,6 +42,15 @@ type Config struct {
 	CloudflareZoneID    string
 	CertEmail           string        // ACME registration contact (default admin@<GameServerDomain>)
 	CertRenewalInterval time.Duration // worker tick interval; default 12h
+
+	// WSLivenessDisconnectEnabled gates whether the WebSocket ping/pong
+	// keepalive on /match/join and /lobby/* actually drops idle clients.
+	// When false (default during the rollout window), the server still pings
+	// and tracks pong arrivals but only logs a warning on missed pongs —
+	// clients that haven't been updated yet stay connected. Flip to true once
+	// staging telemetry shows the warning rate has dropped to acceptable
+	// levels; idle clients then get disconnected after WSLivenessPongGrace.
+	WSLivenessDisconnectEnabled bool
 }
 
 func InitConfig() (*Config, error) {
@@ -181,6 +190,8 @@ func InitConfig() (*Config, error) {
 	} else {
 		cfg.CertRenewalInterval = 12 * time.Hour
 	}
+
+	cfg.WSLivenessDisconnectEnabled = os.Getenv("WS_LIVENESS_DISCONNECT_ENABLED") == "true"
 
 	return cfg, nil
 }

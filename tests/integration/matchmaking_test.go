@@ -64,6 +64,64 @@ func TestQueueSizeRequiresAuth(t *testing.T) {
 	DoReq(t, "GET", h.BaseURL()+"/match/size?gameID=fake", nil, "", http.StatusUnauthorized)
 }
 
+// TestMatchmakingDisconnectCommand verifies that sending "/disconnect" on
+// the matchmaking WS removes the player from the queue synchronously
+// (instead of leaving them to TTL/GC, which can take ~3 minutes).
+func TestMatchmakingDisconnectCommand(t *testing.T) {
+	h := NewHarness(t)
+
+	RegisterUser(t, h.BaseURL(), "dcowner", "dcowner@example.com", "pass")
+	ownerToken, _ := LoginUser(t, h.BaseURL(), "dcowner@example.com", "pass")
+	game := CreateGame(t, h.BaseURL(), ownerToken, "DisconnectGame", 2)
+	gameID := game["id"].(string)
+
+	guestToken, _ := GuestLogin(t, h.BaseURL(), "dcguest")
+
+	ws := WebsocketConnect(t, fmt.Sprintf("%s/match/join?gameID=%s", h.BaseURL(), gameID), guestToken)
+	defer ws.Close()
+
+	_, msg, err := ws.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read queue_joined: %v", err)
+	}
+	var hello map[string]interface{}
+	json.Unmarshal(msg, &hello)
+	if hello["status"] != "queue_joined" {
+		t.Fatalf("expected queue_joined, got %v", hello["status"])
+	}
+
+	if size := QueueSize(t, h.BaseURL(), guestToken, gameID); size != 1 {
+		t.Fatalf("pre-disconnect: expected 1 in queue, got %v", size)
+	}
+
+	if err := ws.WriteMessage(websocket.TextMessage, []byte("/disconnect")); err != nil {
+		t.Fatalf("failed to send /disconnect: %v", err)
+	}
+
+	// Read until we see "disconnected" (might be preceded by a "searching"
+	// status heartbeat racing the disconnect).
+	ws.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		_, msg, err := ws.ReadMessage()
+		if err != nil {
+			t.Fatalf("did not see disconnected ack before WS error: %v", err)
+		}
+		var resp map[string]interface{}
+		json.Unmarshal(msg, &resp)
+		if resp["status"] == "disconnected" {
+			break
+		}
+		if resp["status"] == "searching" {
+			continue
+		}
+		t.Fatalf("unexpected frame waiting for disconnected ack: %+v", resp)
+	}
+
+	if size := QueueSize(t, h.BaseURL(), guestToken, gameID); size != 0 {
+		t.Errorf("post-disconnect: expected 0 in queue, got %v", size)
+	}
+}
+
 func TestMatchPairingTwoGuests(t *testing.T) {
 	h := NewHarness(t)
 
