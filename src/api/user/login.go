@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/andy98725/elo-service/src/api/auth"
+	"github.com/andy98725/elo-service/src/util"
 	"github.com/labstack/echo"
 )
 
@@ -28,6 +29,10 @@ func Login(c echo.Context) error {
 	req := new(LoginRequest)
 	if err := c.Bind(req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request payload")
+	}
+
+	if req.DisplayName != "" && util.IsProfane(req.DisplayName) {
+		return echo.NewHTTPError(http.StatusBadRequest, "displayName contains disallowed language")
 	}
 
 	token, user, err := auth.Login(req.Email, req.DisplayName, req.Password)

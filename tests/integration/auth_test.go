@@ -24,6 +24,11 @@ func TestGuestLoginMissingName(t *testing.T) {
 	DoReq(t, "POST", h.BaseURL()+"/guest/login", map[string]string{"displayName": ""}, "", http.StatusBadRequest)
 }
 
+func TestGuestLoginProfaneName(t *testing.T) {
+	h := NewHarness(t)
+	DoReq(t, "POST", h.BaseURL()+"/guest/login", map[string]string{"displayName": "fuckface"}, "", http.StatusBadRequest)
+}
+
 func TestUserRegistration(t *testing.T) {
 	h := NewHarness(t)
 

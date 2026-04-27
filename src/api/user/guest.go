@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/andy98725/elo-service/src/api/auth"
+	"github.com/andy98725/elo-service/src/util"
 	"github.com/labstack/echo"
 )
 
@@ -30,6 +31,9 @@ func GuestToken(ctx echo.Context) error {
 
 	if req.DisplayName == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "displayName is required")
+	}
+	if util.IsProfane(req.DisplayName) {
+		return echo.NewHTTPError(http.StatusBadRequest, "displayName contains disallowed language")
 	}
 	token, claims, err := auth.GuestLogin(req.DisplayName)
 	if err != nil {
