@@ -11,27 +11,30 @@ import (
 )
 
 type User struct {
-	ID        string    `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	Username  string    `json:"username" gorm:"uniqueIndex;not null"`
-	Email     string    `json:"email" gorm:"uniqueIndex;not null"`
-	Password  string    `json:"password" gorm:"not null"`
-	CreatedAt time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
-	IsAdmin   bool      `json:"is_admin" gorm:"default:false"`
+	ID            string    `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
+	Username      string    `json:"username" gorm:"uniqueIndex;not null"`
+	Email         string    `json:"email" gorm:"uniqueIndex;not null"`
+	Password      string    `json:"password" gorm:"not null"`
+	CreatedAt     time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	IsAdmin       bool      `json:"is_admin" gorm:"default:false"`
+	CanCreateGame bool      `json:"can_create_game" gorm:"default:false"`
 }
 
 type UserResp struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	IsAdmin  bool   `json:"is_admin"`
+	ID            string `json:"id"`
+	Username      string `json:"username"`
+	Email         string `json:"email"`
+	IsAdmin       bool   `json:"is_admin"`
+	CanCreateGame bool   `json:"can_create_game"`
 }
 
 func (u *User) ToResp() *UserResp {
 	return &UserResp{
-		ID:       u.ID,
-		Username: u.Username,
-		Email:    u.Email,
-		IsAdmin:  u.IsAdmin,
+		ID:            u.ID,
+		Username:      u.Username,
+		Email:         u.Email,
+		IsAdmin:       u.IsAdmin,
+		CanCreateGame: u.CanCreateGame,
 	}
 }
 
@@ -94,6 +97,27 @@ func GetById(id string) (*User, error) {
 	var user User
 	result := server.S.DB.First(&user, "id = ?", id)
 	return &user, result.Error
+}
+
+var ErrNotAdmin = errors.New("admin access required")
+
+// SetCanCreateGame flips the can_create_game flag on the target user. Only an
+// admin caller may invoke this — the route guard already enforces this, but
+// keeping the check here too means model-level callers can't accidentally
+// bypass it.
+func SetCanCreateGame(targetID string, value bool, actor *User) (*User, error) {
+	if actor == nil || !actor.IsAdmin {
+		return nil, ErrNotAdmin
+	}
+	target, err := GetById(targetID)
+	if err != nil {
+		return nil, err
+	}
+	target.CanCreateGame = value
+	if err := server.S.DB.Model(target).Update("can_create_game", value).Error; err != nil {
+		return nil, err
+	}
+	return target, nil
 }
 
 func UserIDFromContext(ctx echo.Context) (string, error) {

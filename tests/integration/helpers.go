@@ -82,11 +82,50 @@ func GuestLogin(t *testing.T, baseURL string, displayName string) (token string,
 
 func RegisterUser(t *testing.T, baseURL string, username, email, password string) (userResp map[string]interface{}) {
 	t.Helper()
+	resp := DoReq(t, "POST", baseURL+"/user", map[string]string{
+		"username": username,
+		"email":    email,
+		"password": password,
+	}, "", http.StatusOK)
+	// Default registered users to can_create_game=true so the rest of the
+	// test suite (which routinely creates games) doesn't have to flip the
+	// flag every time. Tests that exercise the gate itself should call
+	// RegisterUserPlain instead.
+	if id, ok := resp["id"].(string); ok {
+		grantCanCreateGame(t, id, true)
+	}
+	return resp
+}
+
+// RegisterUserPlain registers a user without granting the can_create_game
+// permission — intended only for tests that exercise the gate.
+func RegisterUserPlain(t *testing.T, baseURL string, username, email, password string) (userResp map[string]interface{}) {
+	t.Helper()
 	return DoReq(t, "POST", baseURL+"/user", map[string]string{
 		"username": username,
 		"email":    email,
 		"password": password,
 	}, "", http.StatusOK)
+}
+
+func grantCanCreateGame(t *testing.T, userID string, value bool) {
+	t.Helper()
+	if err := server.S.DB.Exec(
+		"UPDATE users SET can_create_game = ? WHERE id = ?", value, userID,
+	).Error; err != nil {
+		t.Fatalf("granting can_create_game: %v", err)
+	}
+}
+
+// MakeAdmin promotes a user to admin via direct DB write (no admin-bootstrap
+// API exists). Intended for tests that need to exercise admin-guarded routes.
+func MakeAdmin(t *testing.T, userID string) {
+	t.Helper()
+	if err := server.S.DB.Exec(
+		"UPDATE users SET is_admin = ? WHERE id = ?", true, userID,
+	).Error; err != nil {
+		t.Fatalf("promoting to admin: %v", err)
+	}
 }
 
 func LoginUser(t *testing.T, baseURL string, email, password string) (token string, userID string) {

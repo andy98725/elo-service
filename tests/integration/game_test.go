@@ -48,6 +48,56 @@ func TestCreateGameRequiresAuth(t *testing.T) {
 	}, "", http.StatusUnauthorized)
 }
 
+func TestCreateGameRequiresCanCreateGame(t *testing.T) {
+	h := NewHarness(t)
+
+	// Register without granting can_create_game.
+	RegisterUserPlain(t, h.BaseURL(), "nogamer", "nogamer@example.com", "pass")
+	token, _ := LoginUser(t, h.BaseURL(), "nogamer@example.com", "pass")
+
+	DoReq(t, "POST", h.BaseURL()+"/game", map[string]interface{}{
+		"name":                      "BlockedGame",
+		"lobby_size":                2,
+		"matchmaking_machine_name":  "docker.io/test/game:latest",
+		"matchmaking_machine_ports": []int64{8080},
+	}, token, http.StatusForbidden)
+}
+
+func TestUpdateUserCanCreateGameAdminOnly(t *testing.T) {
+	h := NewHarness(t)
+
+	RegisterUserPlain(t, h.BaseURL(), "plainuser", "plain@example.com", "pass")
+	plainToken, _ := LoginUser(t, h.BaseURL(), "plain@example.com", "pass")
+
+	target := RegisterUserPlain(t, h.BaseURL(), "target", "target@example.com", "pass")
+	targetID := target["id"].(string)
+
+	// A non-admin trying to grant themselves the flag is forbidden.
+	DoReq(t, "PUT", h.BaseURL()+"/user",
+		map[string]bool{"can_create_game": true}, plainToken, http.StatusForbidden)
+
+	// A non-admin can't target another user (the ?id= query is silently
+	// ignored for non-admins, so this still 403s on the can_create_game
+	// guard rather than impersonating).
+	DoReq(t, "PUT", fmt.Sprintf("%s/user?id=%s", h.BaseURL(), targetID),
+		map[string]bool{"can_create_game": true}, plainToken, http.StatusForbidden)
+
+	// Promote a separate user to admin and retry against the target.
+	RegisterUserPlain(t, h.BaseURL(), "boss", "boss@example.com", "pass")
+	bossToken, bossID := LoginUser(t, h.BaseURL(), "boss@example.com", "pass")
+	MakeAdmin(t, bossID)
+
+	resp := DoReq(t, "PUT", fmt.Sprintf("%s/user?id=%s", h.BaseURL(), targetID),
+		map[string]bool{"can_create_game": true}, bossToken, http.StatusOK)
+	if resp["can_create_game"] != true {
+		t.Errorf("expected can_create_game true, got %v", resp["can_create_game"])
+	}
+
+	// The previously-blocked user can now create a game.
+	targetToken, _ := LoginUser(t, h.BaseURL(), "target@example.com", "pass")
+	CreateGame(t, h.BaseURL(), targetToken, "UnblockedGame", 2)
+}
+
 func TestGetGame(t *testing.T) {
 	h := NewHarness(t)
 

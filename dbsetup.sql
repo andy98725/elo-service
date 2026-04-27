@@ -4,6 +4,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- TODO: Add admin user manually
 -- Then set is_admin to true
-UPDATE users 
-SET is_admin = TRUE 
+UPDATE users
+SET is_admin = TRUE,
+    can_create_game = TRUE
 WHERE username = 'tetr4';

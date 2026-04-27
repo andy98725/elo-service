@@ -1,6 +1,7 @@
 package user
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/andy98725/elo-service/src/models"
@@ -61,16 +62,58 @@ func GetUsers(ctx echo.Context) error {
 	})
 }
 
+type UpdateUserRequest struct {
+	// CanCreateGame is admin-only. Pointer so we can distinguish "field
+	// omitted" from "explicit false" — non-admins setting it (either value)
+	// gets a 403.
+	CanCreateGame *bool `json:"can_create_game,omitempty"`
+}
+
 // UpdateUser godoc
-// @Summary      Update current user
-// @Description  Updates the authenticated user's profile (not yet implemented)
+// @Summary      Update a user
+// @Description  Updates user fields. Defaults to the authenticated user;
+// @Description  admins may target another user with `?id=<userID>`.
+// @Description  `can_create_game` is admin-only.
 // @Tags         Users
+// @Accept       json
+// @Produce      json
 // @Security     BearerAuth
-// @Success      200
+// @Param        id   query string             false "Target user UUID (admin only)"
+// @Param        body body UpdateUserRequest   true  "Fields to update"
+// @Success      200 {object} models.UserResp
+// @Failure      400 {object} echo.HTTPError
+// @Failure      403 {object} echo.HTTPError
+// @Failure      404 {object} echo.HTTPError
 // @Router       /user [put]
 func UpdateUser(ctx echo.Context) error {
-	//TODO
-	return nil
+	req := new(UpdateUserRequest)
+	if err := ctx.Bind(req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request payload")
+	}
+
+	targetID, err := models.UserIDFromContext(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "error resolving user: "+err.Error())
+	}
+
+	target, err := models.GetById(targetID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "user not found")
+	}
+
+	actor := ctx.Get("user").(*models.User)
+
+	if req.CanCreateGame != nil {
+		target, err = models.SetCanCreateGame(targetID, *req.CanCreateGame, actor)
+		if err != nil {
+			if errors.Is(err, models.ErrNotAdmin) {
+				return echo.NewHTTPError(http.StatusForbidden, err.Error())
+			}
+			return echo.NewHTTPError(http.StatusInternalServerError, "error updating user: "+err.Error())
+		}
+	}
+
+	return ctx.JSON(http.StatusOK, target.ToResp())
 }
 
 // DeleteUser godoc
