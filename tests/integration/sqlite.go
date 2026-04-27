@@ -26,7 +26,8 @@ func migrateForSQLite(db *gorm.DB) error {
 			email TEXT NOT NULL UNIQUE,
 			password TEXT NOT NULL,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			is_admin INTEGER DEFAULT 0
+			is_admin INTEGER DEFAULT 0,
+			can_create_game INTEGER DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS games (
 			id TEXT PRIMARY KEY,
@@ -42,7 +43,7 @@ func migrateForSQLite(db *gorm.DB) error {
 			elo_strategy TEXT NOT NULL DEFAULT 'unranked',
 			default_rating INTEGER DEFAULT 1000,
 			public_results INTEGER DEFAULT 1,
-			public_match_logs INTEGER DEFAULT 1,
+			public_match_logs INTEGER DEFAULT 0,
 			metadata_enabled INTEGER DEFAULT 0,
 			lobby_enabled INTEGER DEFAULT 1,
 			FOREIGN KEY (owner_id) REFERENCES users(id)

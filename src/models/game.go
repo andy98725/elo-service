@@ -43,7 +43,7 @@ type Game struct {
 	ELOStrategy             string        `json:"elo_strategy" gorm:"not null;default:'unranked'"`
 	DefaultRating           int           `json:"default_rating" gorm:"default:1000"`
 	PublicResults           bool          `json:"public_results" gorm:"default:true"`
-	PublicMatchLogs         bool          `json:"public_match_logs" gorm:"default:true"`
+	PublicMatchLogs         bool          `json:"public_match_logs" gorm:"default:false"`
 	MetadataEnabled         bool          `json:"metadata_enabled" gorm:"default:false"`
 }
 
@@ -83,15 +83,14 @@ type CreateGameParams struct {
 	Name                    string
 	Description             string
 	GuestsAllowed           bool
-	PublicResults           bool
+	PublicResults           *bool
 	LobbyEnabled            *bool
 	LobbySize               int
 	MatchmakingStrategy     string
 	MatchmakingMachineName  string
 	MatchmakingMachinePorts []int64
 	ELOStrategy             string
-	PublicMatchResults      bool
-	PublicMatchLogs         bool
+	PublicMatchLogs         *bool
 	MetadataEnabled         bool
 }
 
@@ -117,20 +116,30 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		lobbyEnabled = *params.LobbyEnabled
 	}
 
+	publicResults := true
+	if params.PublicResults != nil {
+		publicResults = *params.PublicResults
+	}
+
+	publicMatchLogs := false
+	if params.PublicMatchLogs != nil {
+		publicMatchLogs = *params.PublicMatchLogs
+	}
+
 	game := &Game{
 		OwnerID:                 owner.ID,
 		Owner:                   owner,
 		Name:                    params.Name,
 		Description:             params.Description,
 		GuestsAllowed:           params.GuestsAllowed,
-		PublicResults:           params.PublicResults,
+		PublicResults:           publicResults,
 		LobbyEnabled:            lobbyEnabled,
 		LobbySize:               params.LobbySize,
 		MatchmakingStrategy:     params.MatchmakingStrategy,
 		MatchmakingMachineName:  params.MatchmakingMachineName,
 		MatchmakingMachinePorts: pq.Int64Array(params.MatchmakingMachinePorts),
 		ELOStrategy:             params.ELOStrategy,
-		PublicMatchLogs:         params.PublicMatchLogs,
+		PublicMatchLogs:         publicMatchLogs,
 		MetadataEnabled:         params.MetadataEnabled,
 	}
 

@@ -36,6 +36,8 @@ type CreateGameRequest struct {
 	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
 	ELOStrategy             string  `json:"elo_strategy"`
 	MetadataEnabled         bool    `json:"metadata_enabled"`
+	PublicResults           *bool   `json:"public_results"`
+	PublicMatchLogs         *bool   `json:"public_match_logs"`
 }
 
 // CreateGame godoc
@@ -48,6 +50,7 @@ type CreateGameRequest struct {
 // @Param        body body CreateGameRequest true "Game creation payload"
 // @Success      200 {object} models.GameResp
 // @Failure      400 {object} echo.HTTPError
+// @Failure      403 {object} echo.HTTPError "user is not allowed to create games"
 // @Failure      409 {object} echo.HTTPError "game name already taken"
 // @Failure      500 {object} echo.HTTPError
 // @Router       /game [post]
@@ -60,6 +63,9 @@ func CreateGame(ctx echo.Context) error {
 	slog.Info("Creating game", "game", req)
 
 	user := ctx.Get("user").(*models.User)
+	if !user.IsAdmin && !user.CanCreateGame {
+		return echo.NewHTTPError(http.StatusForbidden, "user is not allowed to create games")
+	}
 	game, err := models.CreateGame(models.CreateGameParams{
 		Name:                    req.Name,
 		Description:             req.Description,
@@ -71,6 +77,8 @@ func CreateGame(ctx echo.Context) error {
 		MatchmakingMachinePorts: req.MatchmakingMachinePorts,
 		ELOStrategy:             req.ELOStrategy,
 		MetadataEnabled:         req.MetadataEnabled,
+		PublicResults:           req.PublicResults,
+		PublicMatchLogs:         req.PublicMatchLogs,
 	}, *user)
 	if err != nil {
 		if isUniqueConstraintViolation(err) {

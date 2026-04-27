@@ -60,7 +60,7 @@ Content-Type: application/json
 
 Response `200`:
 ```json
-{ "id": "<uuid>", "username": "alice", "email": "alice@example.com", "is_admin": false }
+{ "id": "<uuid>", "username": "alice", "email": "alice@example.com", "is_admin": false, "can_create_game": false }
 ```
 
 Errors: `400` (missing/invalid fields), `409` (username or email already taken).
@@ -74,7 +74,7 @@ Content-Type: application/json
 { "email": "alice@example.com", "password": "…" }
 ```
 
-(Or substitute `"displayName"` for `"email"` to log in by username.)
+Login is by email only. The optional `"displayName"` field in the request is echoed back in the response (see quirk below); it is not used for lookup.
 
 Response `200`:
 ```json
@@ -104,7 +104,6 @@ Every match is for a specific **game** — a registered Docker image + match con
 |---|---|---|---|
 | `/game/{id}` | GET | user | Fetch one game by UUID |
 | `/user/game?page=&pageSize=` | GET | user | List games owned by the current user |
-| `/games?page=&pageSize=` | GET | admin | List all games (admin only) |
 
 Game listings return:
 ```json
@@ -112,22 +111,24 @@ Game listings return:
   "games": [
     {
       "id": "<uuid>",
+      "owner": { "id": "<uuid>", "username": "alice", "email": "…", "is_admin": false, "can_create_game": true },
       "name": "TicTacToe",
       "description": "…",
-      "lobby_size": 2,
-      "lobby_enabled": true,
       "guests_allowed": true,
-      "metadata_enabled": false,
+      "lobby_enabled": true,
+      "lobby_size": 2,
       "matchmaking_strategy": "random",
+      "matchmaking_machine_name": "alice/tictactoe:latest",
+      "matchmaking_machine_ports": [8080],
       "elo_strategy": "unranked",
-      "created_at": "…"
+      "metadata_enabled": false
     }
   ],
   "nextPage": 2
 }
 ```
 
-There is currently **no public "browse all games" endpoint** for non-admins — get the game UUID out of band (config, link, etc.) and queue against it.
+There is currently **no public "browse all games" endpoint** — get the game UUID out of band (config, link, etc.) and queue against it.
 
 ---
 
@@ -179,7 +180,10 @@ On failure, you'll get exactly one error frame and the WS will close:
 { "status": "error", "error": "<reason>" }
 ```
 
-Common error reasons: `"gameID is required"`, `"metadata exceeds maximum size"`, `"server not ready"` (the spawned container failed to come up), or any underlying queue-join error from the service.
+Common error reasons, by phase:
+
+- **Before queue join** (sent before `queue_joined`): `"gameID is required"`, `"metadata exceeds maximum size"`, `"record not found"` (no game with that UUID), or any underlying queue-join error from the service.
+- **After `server_starting`**: `"server not ready"` — the spawned container failed to come up within the health-poll window.
 
 ### TTL refresh
 
@@ -203,7 +207,7 @@ You can connect directly:
 
 Browsers running on an HTTPS page **cannot** open `ws://` or non-TLS connections (mixed-content block). For these clients, the service runs Caddy on every game-server host with a wildcard TLS certificate covering `*.gs.elomm.net`, so that:
 
-- `server_host` will be a hostname like `host-abc123.gs.elomm.net` — already resolves to the host's IP
+- `server_host` will be a hostname like `host-<machine-host-uuid>.gs.elomm.net` (full UUID, not a slug) — already resolves to the host's IP
 - TCP-based protocols (HTTP, WebSocket) on `server_ports[i]` are reverse-proxied through Caddy with TLS termination
 
 Connect with:
@@ -224,7 +228,7 @@ const url = `wss://${matchFound.server_host}:${matchFound.server_ports[0]}`;
 const url = `ws://${match.server_host}:${match.server_ports[0]}`;
 ```
 
-If `server_host` looks like an IPv4, the host is non-TLS — only a native client can use it. If your game must work in browsers, ensure the service's wildcard-TLS path is enabled on staging (it is, as of 2026-04). If you receive an IP-only `server_host` in a browser, fail with a clear error.
+If `server_host` looks like an IPv4, the host is non-TLS — only a native client can use it. Production hands out hostnames; if you receive an IP-only `server_host` in a browser, the wildcard-TLS subsystem on the matchmaker is degraded — fail with a clear error.
 
 ### Identifying yourself to the game server
 
@@ -258,7 +262,7 @@ After a match ends, the game server reports its result to elo-service, which per
 | `/results/{matchID}` | GET | user/guest | One match's final result (winners, reason) |
 | `/game/{gameID}/results?page=&pageSize=` | GET | user/guest | Paginated results for a game (filtered to what the caller can see) |
 | `/user/results?page=&pageSize=` | GET | user/guest | The caller's own match history |
-| `/results/{matchID}/logs` | GET | user/guest | Container stdout for the match (only if the game has `public_match_logs=true`, else admin/owner only) |
+| `/results/{matchID}/logs` | GET | user/guest | Container stdout for the match (only if the game has `public_match_logs=true`, else owner-only) |
 
 Visibility is enforced server-side per the game's `public_results` flag — non-public games only show results to participants/owners. `404 Not Found` is returned both for missing results and for results the caller can't see (don't infer existence from the status code).
 
@@ -422,8 +426,6 @@ WebSocket failures use the in-band `{"status": "error", "error": …}` frame ins
 | `POST` | `/user` | none | Register |
 | `POST` | `/user/login` | none | Login |
 | `GET`  | `/user` | user | Current user info |
-| `PUT`  | `/user` | user | Update current user |
-| `DELETE` | `/user` | user | Delete current user |
 | `GET`  | `/game/{id}` | user | Fetch a game by UUID |
 | `GET`  | `/user/game` | user | List your games |
 | `GET`  | `/match/size` | user/guest | Queue size for a game |

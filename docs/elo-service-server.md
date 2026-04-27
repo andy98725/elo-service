@@ -39,7 +39,7 @@ The number of player IDs equals the game's `lobby_size`. They arrive in no parti
 You **must** parse argv before doing anything else and fail loudly if either `-token` or the player ID list is missing.
 
 ```go
-// Reference: example-game-server/main.go:250-278
+// Reference: example-game-server/main.go, func main()
 flag.StringVar(&tokenID, "token", "", "Token ID (required)")
 flag.Parse()
 playerIDs := flag.Args()
@@ -82,17 +82,17 @@ Content-Type: application/json
 - `winner_ids` is a list. For single-winner games you can use the legacy `winner_id` (string) field instead — the server normalizes it to a one-element list. An empty array is allowed (draw / abort).
 - `reason` is a free-form string; convention is `"completed"` for normal endings, `"timeout"` if you ended early, anything else is fine for your own bookkeeping.
 
-There is **no Authorization header** on this endpoint — the per-match `token_id` *is* the credential. A successful report ends the match; subsequent reports on the same token return `500 Failed to end match`. It's safe to retry on network failure, but treat any 2xx as terminal.
+There is **no Authorization header** on this endpoint — the per-match `token_id` *is* the credential. A successful report ends the match and deletes the underlying `Match` row; the token will not resolve again, so a second report returns `404 Match not found`. It's safe to retry on network failure, but treat any 2xx as terminal.
 
-> **Where does the URL come from?** The matchmaker does **not** inject any environment variables into your container, so `https://elomm.net/result/report` has to come from somewhere you control. Two common patterns:
+> **Where does the URL come from?** The matchmaker does **not** inject any environment variables into your container, so the reporting URL has to come from somewhere you control. Two common patterns:
 >
-> 1. **Hard-code it** in your source. Simplest; fine for production-only servers.
-> 2. **Bake it via Dockerfile `ENV`** — useful if you want to point at a local elo-service during development. The reference image uses this:
+> 1. **Hard-code it** in your source. Simplest; fine for production-only servers. Use `https://elomm.net/result/report`.
+> 2. **Bake it via Dockerfile `ENV`** — useful if you want to point at a local elo-service during development. The reference image uses this (currently pinned to the Fly internal hostname, which routes to the same service):
 >     ```dockerfile
->     ARG WEBSITE_URL=https://elomm.net/result/report
+>     ARG WEBSITE_URL=https://elo-service.fly.dev/result/report
 >     ENV WEBSITE_URL=$WEBSITE_URL
 >     ```
->    Then your code reads `os.Getenv("WEBSITE_URL")`. Override at build time with `--build-arg WEBSITE_URL=...`.
+>    Then your code reads `os.Getenv("WEBSITE_URL")`. Override at build time with `--build-arg WEBSITE_URL=...`. `https://elomm.net/result/report` and `https://elo-service.fly.dev/result/report` both reach the same backend.
 
 After a successful POST, the host agent will stop and remove your container shortly. Exit cleanly after reporting.
 
@@ -104,10 +104,12 @@ The matchmaker hands clients a payload like:
 
 ```json
 { "status": "match_found",
-  "server_host":  "host-abc123.gs.elomm.net",   // OR raw IPv4
+  "server_host":  "host-a4f9b2d8-1234-5678-90ab-cdef01234567.gs.elomm.net",   // OR raw IPv4
   "server_ports": [7042, 7043],
   "match_id":     "<uuid>" }
 ```
+
+The hostname format is `host-<machine-host-uuid>.gs.elomm.net` — the full host UUID, not a short slug.
 
 The client opens a connection to `<server_host>:<server_ports[i]>`. They will connect using:
 
@@ -162,7 +164,9 @@ Content-Type: application/json
   "matchmaking_machine_name":   "your-dockerhub-user/your-image:latest",
   "matchmaking_machine_ports":  [8080],
   "elo_strategy":               "unranked",
-  "metadata_enabled":           false
+  "metadata_enabled":           false,
+  "public_results":             true,
+  "public_match_logs":          false
 }
 ```
 
@@ -180,8 +184,8 @@ Field reference:
 | `matchmaking_strategy` | no | `"random"` | `"random"` or `"rating"`. Affects who pairs with whom in the queue. |
 | `elo_strategy` | no | `"unranked"` | `"unranked"` (no rating updates) or `"classic"` (Elo). |
 | `metadata_enabled` | no | `false` | If `true`, the `metadata` query param on `/match/join` segments the queue (e.g., by region or game mode). |
-| `public_results` | no | `false` | If `true`, anyone can see match results for this game. |
-| `public_match_logs` | no | `false` | If `true`, anyone can download container logs. |
+| `public_results` | no | `true` | If `true`, anyone can see match results for this game; if `false`, only participants and the game owner. |
+| `public_match_logs` | no | `false` | If `true`, anyone with a result can download container logs; if `false`, only the game owner. |
 
 Response `200`: a `GameResp` with the new `id` (UUID). That UUID is the `gameID` your clients pass to `/match/join`.
 
