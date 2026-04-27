@@ -252,7 +252,7 @@ write_files:
 runcmd:
   - systemctl start docker
   # Generate per-port reverse_proxy stanzas for the entire game-port range.
-  - bash -c 'cp /etc/caddy/Caddyfile.head /etc/caddy/Caddyfile && for p in $(seq %d %d); do printf ":%%s {\n  tls /etc/caddy/cert.pem /etc/caddy/key.pem\n  reverse_proxy localhost:%%s\n}\n" "$p" "$((p+%d))" >> /etc/caddy/Caddyfile; done'
+  - bash -c 'cp /etc/caddy/Caddyfile.head /etc/caddy/Caddyfile && for p in $(seq %d %d); do if [ "$p" -eq %d ]; then continue; fi; printf ":%%s {\n  tls /etc/caddy/cert.pem /etc/caddy/key.pem\n  reverse_proxy localhost:%%s\n}\n" "$p" "$((p+%d))" >> /etc/caddy/Caddyfile; done'
   - docker pull caddy:2
   - docker run -d --name caddy
       --restart always
@@ -273,10 +273,14 @@ func hostCloudConfig(agentPort int64, agentToken string, tls *HostTLSOpts) strin
 	if tls == nil {
 		return fmt.Sprintf(hostCloudConfigLegacyTemplate, agentPort, agentToken)
 	}
+	// Caddy listens on every port in the range EXCEPT the agent port, which
+	// is bound by the agent container. Agent port is normally inside
+	// [PortRangeStart, PortRangeEnd] (default 8080 in 7000-9000), so the
+	// shell loop skips it explicitly.
 	return fmt.Sprintf(hostCloudConfigTLSTemplate,
 		indent(string(tls.CertPEM), 6),
 		indent(string(tls.KeyPEM), 6),
-		tls.PortRangeStart, tls.PortRangeEnd, internalPortShift,
+		tls.PortRangeStart, tls.PortRangeEnd, agentPort, internalPortShift,
 		agentPort, agentToken, internalPortShift,
 	)
 }
