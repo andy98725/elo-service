@@ -116,6 +116,47 @@ func TestReportMatchResult(t *testing.T) {
 	}
 }
 
+// TestReportMatchResultRegisteredUsers exercises the result-report flow
+// for a match between two registered users. This is the path that
+// surfaced a production bug: tx.Delete(&Match{}) doesn't cascade through
+// the match_players join table, and the FK constraint blocks the delete
+// — leaving the match stuck in "started" state forever and the GC
+// looping on it. Guest-only matches don't trip this because guest IDs
+// live inline on matches.guest_ids, not in match_players.
+func TestReportMatchResultRegisteredUsers(t *testing.T) {
+	h := NewHarness(t)
+	gameID, _, p1ID, _, _, authCode := setupMatchedRegisteredGame(t, h, "regrep")
+
+	DoReq(t, "POST", h.BaseURL()+"/result/report", map[string]interface{}{
+		"token_id":   authCode,
+		"winner_ids": []string{p1ID},
+		"reason":     "p1 wins",
+	}, "", http.StatusOK)
+
+	// Match row gone.
+	var matchCount int64
+	if err := server.S.DB.Model(&models.Match{}).
+		Where("game_id = ?", gameID).
+		Count(&matchCount).Error; err != nil {
+		t.Fatalf("count matches: %v", err)
+	}
+	if matchCount != 0 {
+		t.Errorf("expected match deleted after report, got %d remaining", matchCount)
+	}
+
+	// match_players join rows for this match are gone too. Querying
+	// by raw SQL because there's no model wrapper for the join table.
+	var joinCount int64
+	if err := server.S.DB.
+		Raw("SELECT COUNT(*) FROM match_players WHERE user_id = ?", p1ID).
+		Scan(&joinCount).Error; err != nil {
+		t.Fatalf("count match_players: %v", err)
+	}
+	if joinCount != 0 {
+		t.Errorf("expected match_players cleared, got %d rows", joinCount)
+	}
+}
+
 func TestReportResultInvalidToken(t *testing.T) {
 	h := NewHarness(t)
 	DoReq(t, "POST", h.BaseURL()+"/result/report", map[string]interface{}{

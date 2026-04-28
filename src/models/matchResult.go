@@ -72,6 +72,16 @@ func MatchEnded(matchID string, winnerIDs []string, result string, logsKey strin
 			return err
 		}
 
+		// Clear the many2many join rows before deleting the match itself.
+		// GORM does not auto-cascade many2many on Delete, and the FK
+		// (fk_match_players_match) blocks the delete otherwise. Bug
+		// surfaces only when the match contained registered users —
+		// guest-only matches store IDs inline in matches.guest_ids and
+		// never touch this join table.
+		if err := tx.Exec("DELETE FROM match_players WHERE match_id = ?", matchID).Error; err != nil {
+			return err
+		}
+
 		if err := tx.Delete(&Match{ID: matchID}).Error; err != nil {
 			return err
 		}
