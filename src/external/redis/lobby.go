@@ -38,14 +38,15 @@ return 1
 `)
 
 type LobbyRecord struct {
-	ID         string    `json:"id"`
-	GameID     string    `json:"game_id"`
-	HostID     string    `json:"host_id"`
-	HostName   string    `json:"host_name"`
-	Tags       []string  `json:"tags"`
-	Metadata   string    `json:"metadata"`
-	MaxPlayers int       `json:"max_players"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID           string    `json:"id"`
+	GameID       string    `json:"game_id"`
+	HostID       string    `json:"host_id"`
+	HostName     string    `json:"host_name"`
+	Tags         []string  `json:"tags"`
+	Metadata     string    `json:"metadata"`
+	MaxPlayers   int       `json:"max_players"`
+	CreatedAt    time.Time `json:"created_at"`
+	PasswordHash string    `json:"-"`
 }
 
 func lobbyKey(lobbyID string) string         { return "lobby_" + lobbyID }
@@ -76,6 +77,7 @@ func (r *Redis) CreateLobby(ctx context.Context, lobby *LobbyRecord) error {
 		"metadata", lobby.Metadata,
 		"max_players", strconv.Itoa(lobby.MaxPlayers),
 		"created_at", lobby.CreatedAt.Format(time.RFC3339Nano),
+		"password_hash", lobby.PasswordHash,
 	)
 	pipe.SAdd(ctx, lobbyIndexKey(lobby.GameID), lobby.ID)
 	_, err = pipe.Exec(ctx)
@@ -97,14 +99,15 @@ func (r *Redis) GetLobby(ctx context.Context, lobbyID string) (*LobbyRecord, err
 		_ = json.Unmarshal([]byte(raw), &tags)
 	}
 	return &LobbyRecord{
-		ID:         fields["id"],
-		GameID:     fields["game_id"],
-		HostID:     fields["host_id"],
-		HostName:   fields["host_name"],
-		Tags:       tags,
-		Metadata:   fields["metadata"],
-		MaxPlayers: maxPlayers,
-		CreatedAt:  createdAt,
+		ID:           fields["id"],
+		GameID:       fields["game_id"],
+		HostID:       fields["host_id"],
+		HostName:     fields["host_name"],
+		Tags:         tags,
+		Metadata:     fields["metadata"],
+		MaxPlayers:   maxPlayers,
+		CreatedAt:    createdAt,
+		PasswordHash: fields["password_hash"],
 	}, nil
 }
 

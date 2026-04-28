@@ -29,28 +29,30 @@ type lobbyEvent struct {
 }
 
 type LobbyResp struct {
-	ID         string    `json:"id"`
-	GameID     string    `json:"game_id"`
-	HostID     string    `json:"host_id"`
-	HostName   string    `json:"host_name"`
-	Tags       []string  `json:"tags"`
-	Metadata   string    `json:"metadata"`
-	Players    int       `json:"players"`
-	MaxPlayers int       `json:"max_players"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID                string    `json:"id"`
+	GameID            string    `json:"game_id"`
+	HostID            string    `json:"host_id"`
+	HostName          string    `json:"host_name"`
+	Tags              []string  `json:"tags"`
+	Metadata          string    `json:"metadata"`
+	Players           int       `json:"players"`
+	MaxPlayers        int       `json:"max_players"`
+	CreatedAt         time.Time `json:"created_at"`
+	PasswordProtected bool      `json:"password_protected"`
 }
 
 func toResp(rec *redis.LobbyRecord, players int) *LobbyResp {
 	return &LobbyResp{
-		ID:         rec.ID,
-		GameID:     rec.GameID,
-		HostID:     rec.HostID,
-		HostName:   rec.HostName,
-		Tags:       rec.Tags,
-		Metadata:   rec.Metadata,
-		Players:    players,
-		MaxPlayers: rec.MaxPlayers,
-		CreatedAt:  rec.CreatedAt,
+		ID:                rec.ID,
+		GameID:            rec.GameID,
+		HostID:            rec.HostID,
+		HostName:          rec.HostName,
+		Tags:              rec.Tags,
+		Metadata:          rec.Metadata,
+		Players:           players,
+		MaxPlayers:        rec.MaxPlayers,
+		CreatedAt:         rec.CreatedAt,
+		PasswordProtected: rec.PasswordHash != "",
 	}
 }
 
