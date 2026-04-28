@@ -2,6 +2,7 @@ package matchmaking
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -15,6 +16,60 @@ const (
 	MATCH_MAX_DURATION = 6 * time.Hour
 	GC_PAGE_SIZE       = 100
 )
+
+// ReconcileLiveHosts compares MachineHost rows in 'ready' state against
+// the list of VMs the provider says are actually alive. Any DB row whose
+// VM is missing is marked deleted and its allocated ports freed.
+//
+// Why this exists: VMs can be destroyed out-of-band (manual console
+// action, provider maintenance, earlier matchmaker bugs) without the
+// matchmaker's knowledge. The DB row stays 'ready' forever, the
+// matchmaker keeps using its stale agent_token against whatever new VM
+// took over the IP (provider IP recycling), and every log-fetch /
+// stop-container call returns HTTP 401. This sweep makes the provider
+// the source of truth for "does this host exist."
+//
+// Restricted to status='ready' — 'provisioning' rows are still being
+// created and there's a brief window before SetMachineHostReady where
+// a ListHosts call could race.
+//
+// Best-effort: a single bad row logs and moves on so the rest of the
+// sweep proceeds. Pairs with ReconcileOrphanedInstances, which then
+// walks SI → host and tears down the orphaned ServerInstance rows.
+func ReconcileLiveHosts(ctx context.Context) error {
+	liveIDs, err := server.S.Machines.ListHosts(ctx)
+	if err != nil {
+		return fmt.Errorf("listing live hosts: %w", err)
+	}
+	live := make(map[string]bool, len(liveIDs))
+	for _, id := range liveIDs {
+		live[id] = true
+	}
+
+	var hosts []models.MachineHost
+	if err := server.S.DB.
+		Where("status = ?", models.MachineHostStatusReady).
+		Find(&hosts).Error; err != nil {
+		return err
+	}
+
+	for _, host := range hosts {
+		if live[host.ProviderID] {
+			continue
+		}
+		slog.Warn("Reconciling stale host (provider VM is gone)",
+			"hostID", host.ID, "providerID", host.ProviderID, "publicIP", host.PublicIP)
+		if err := models.FreePorts(host.ID, []int64(host.AllocatedPorts)); err != nil {
+			slog.Warn("Failed to free ports for stale host",
+				"error", err, "hostID", host.ID)
+		}
+		if err := models.SetMachineHostDeleted(host.ID); err != nil {
+			slog.Error("Failed to mark stale host deleted",
+				"error", err, "hostID", host.ID)
+		}
+	}
+	return nil
+}
 
 // ReconcileOrphanedInstances marks ServerInstance rows deleted when their
 // MachineHost has already been marked deleted. Such rows can otherwise sit

@@ -106,6 +106,27 @@ func (h *HetznerConnection) CreateHost(ctx context.Context, serverType string, a
 	}, nil
 }
 
+// ListHosts returns the provider IDs of every VM in the account labeled
+// role=game-host (the label CreateHost stamps on every VM it creates).
+// Used by the reconciliation pass to detect DB rows whose underlying VM
+// no longer exists at Hetzner — a host destroyed manually via the
+// console, or by an earlier matchmaker bug, will linger as status='ready'
+// otherwise and the matchmaker keeps using its stale agent token against
+// whatever new VM took over its IP, yielding indefinite 401s.
+func (h *HetznerConnection) ListHosts(ctx context.Context) ([]string, error) {
+	servers, err := h.client.Server.AllWithOpts(ctx, hcloud.ServerListOpts{
+		ListOpts: hcloud.ListOpts{LabelSelector: "role=game-host"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing hetzner servers: %w", err)
+	}
+	out := make([]string, 0, len(servers))
+	for _, s := range servers {
+		out = append(out, strconv.FormatInt(s.ID, 10))
+	}
+	return out, nil
+}
+
 // DeleteHost shuts down and permanently deletes a host VM.
 func (h *HetznerConnection) DeleteHost(ctx context.Context, providerID string) error {
 	id, err := strconv.ParseInt(providerID, 10, 64)

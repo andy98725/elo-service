@@ -18,6 +18,10 @@ type MachineService interface {
 	// host is brought up with Caddy + the wildcard cert pre-installed.
 	CreateHost(ctx context.Context, serverType string, agentPort int64, tls *hetzner.HostTLSOpts) (*hetzner.HostConnectionInfo, error)
 	DeleteHost(ctx context.Context, providerID string) error
+	// ListHosts returns the provider IDs of every game-host VM currently
+	// alive at the provider. Used by ReconcileLiveHosts to detect DB rows
+	// whose underlying VM was destroyed out-of-band.
+	ListHosts(ctx context.Context) ([]string, error)
 }
 
 type StorageService interface {

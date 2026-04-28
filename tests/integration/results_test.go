@@ -240,6 +240,68 @@ func TestGarbageCollectTimedOutMatch(t *testing.T) {
 	}
 }
 
+// TestReconcileLiveHosts simulates a host VM being destroyed out-of-band
+// (manual console deletion, provider maintenance) and confirms the
+// reconciliation pass marks the DB row deleted and frees its ports.
+// This is the production scenario that was generating endless 401s on
+// log-fetch / stop-container — DB row stayed 'ready' forever, the
+// matchmaker kept calling the wrong agent.
+func TestReconcileLiveHosts(t *testing.T) {
+	h := NewHarness(t)
+
+	// Set up a match so the warm-pool/match path provisions a host. We
+	// reuse the registered-user setup helper, but only care about the
+	// host that gets created as a side effect.
+	_, _, _, _, _, _ = setupMatchedRegisteredGame(t, h, "rlh")
+
+	var host models.MachineHost
+	if err := server.S.DB.Where("status = ?", models.MachineHostStatusReady).First(&host).Error; err != nil {
+		t.Fatalf("expected a ready host after match setup: %v", err)
+	}
+	if len(host.AllocatedPorts) == 0 {
+		t.Fatalf("expected the host to have allocated ports for the running match")
+	}
+
+	// Vanish the host out from under the matchmaker (simulates the VM
+	// being deleted via the Hetzner console). DB row remains 'ready'.
+	h.Machines.VanishHost(host.ProviderID)
+
+	if err := matchmaking.ReconcileLiveHosts(context.Background()); err != nil {
+		t.Fatalf("ReconcileLiveHosts: %v", err)
+	}
+
+	var refreshed models.MachineHost
+	if err := server.S.DB.First(&refreshed, "id = ?", host.ID).Error; err != nil {
+		t.Fatalf("reload host: %v", err)
+	}
+	if refreshed.Status != models.MachineHostStatusDeleted {
+		t.Errorf("expected host status=%q after reconcile, got %q",
+			models.MachineHostStatusDeleted, refreshed.Status)
+	}
+	if len(refreshed.AllocatedPorts) != 0 {
+		t.Errorf("expected ports freed on stale host, got %v", refreshed.AllocatedPorts)
+	}
+}
+
+func TestReconcileLiveHosts_NoOpWhenAllAlive(t *testing.T) {
+	h := NewHarness(t)
+	_, _, _, _, _, _ = setupMatchedRegisteredGame(t, h, "rlhok")
+
+	if err := matchmaking.ReconcileLiveHosts(context.Background()); err != nil {
+		t.Fatalf("ReconcileLiveHosts: %v", err)
+	}
+
+	var readyCount int64
+	if err := server.S.DB.Model(&models.MachineHost{}).
+		Where("status = ?", models.MachineHostStatusReady).
+		Count(&readyCount).Error; err != nil {
+		t.Fatalf("count ready hosts: %v", err)
+	}
+	if readyCount == 0 {
+		t.Errorf("expected ready host to remain after reconcile, got none")
+	}
+}
+
 func TestReconcileOrphanedInstances(t *testing.T) {
 	h := NewHarness(t)
 	_, _, _, _, _, _ = setupMatchedGame(t, h)

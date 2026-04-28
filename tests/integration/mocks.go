@@ -165,6 +165,30 @@ func (m *MockMachineService) DeleteHost(ctx context.Context, providerID string) 
 	return nil
 }
 
+// ListHosts returns the provider IDs of every host the mock currently
+// considers alive. Tests can simulate an out-of-band VM deletion by
+// mutating the hosts map directly via VanishHost — the next
+// ReconcileLiveHosts call will then see the row as orphaned.
+func (m *MockMachineService) ListHosts(ctx context.Context) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, 0, len(m.hosts))
+	for id := range m.hosts {
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// VanishHost removes a host from the mock's live set without going
+// through DeleteHost — simulates the production scenario where a VM is
+// destroyed via the Hetzner console (or any other out-of-band path)
+// and the matchmaker DB doesn't know.
+func (m *MockMachineService) VanishHost(providerID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.hosts, providerID)
+}
+
 // ActiveHosts returns the count of "live" host VMs the mock has been asked
 // to create and not delete. Hosts are long-lived in the host-pool model;
 // tests asserting about per-match teardown should use ActiveContainers

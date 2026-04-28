@@ -53,6 +53,13 @@ func RunWorker(ctx context.Context, shutdown chan struct{}) {
 		if err := matchmaking.GarbageCollectMatches(ctx); err != nil {
 			slog.Error("Failed to garbage collect matches", "error", err)
 		}
+		// Order matters: ReconcileLiveHosts flips stale MachineHost rows to
+		// 'deleted', which ReconcileOrphanedInstances then walks (SI → host)
+		// to tear down any ServerInstance rows that referenced them. Same
+		// GC tick clears both halves.
+		if err := matchmaking.ReconcileLiveHosts(ctx); err != nil {
+			slog.Error("Failed to reconcile live hosts", "error", err)
+		}
 		if err := matchmaking.ReconcileOrphanedInstances(ctx); err != nil {
 			slog.Error("Failed to reconcile orphaned instances", "error", err)
 		}
