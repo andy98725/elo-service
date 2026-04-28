@@ -1088,6 +1088,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Optional password; joiners must supply the same value to enter",
+                        "name": "password",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "JWT token (alternative to Authorization header)",
                         "name": "token",
                         "in": "query"
@@ -1103,7 +1109,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Upgrades to a WebSocket and joins an existing lobby. Capacity is enforced atomically; rejects with 'lobby is full' once the lobby's player count equals MaxPlayers. Receives lobby events (player_join, player_leave, player_say, lobby_starting) and the post-/start matchmaking handshake.",
+                "description": "Upgrades to a WebSocket and joins an existing lobby. Capacity is enforced atomically; rejects with 'lobby is full' once the lobby's player count equals MaxPlayers. If the lobby was created with a password, the joiner must supply the matching value via the password query param. Receives lobby events (player_join, player_leave, player_say, lobby_starting) and the post-/start matchmaking handshake.",
                 "tags": [
                     "Lobby"
                 ],
@@ -1115,6 +1121,12 @@ const docTemplate = `{
                         "name": "lobbyID",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Required when the lobby is password-protected (see /lobby/find)",
+                        "name": "password",
+                        "in": "query"
                     },
                     {
                         "type": "string",
