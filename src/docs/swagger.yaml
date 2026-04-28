@@ -924,6 +924,10 @@ paths:
         in: query
         name: metadata
         type: string
+      - description: Optional password; joiners must supply the same value to enter
+        in: query
+        name: password
+        type: string
       - description: JWT token (alternative to Authorization header)
         in: query
         name: token
@@ -938,13 +942,19 @@ paths:
     get:
       description: Upgrades to a WebSocket and joins an existing lobby. Capacity is
         enforced atomically; rejects with 'lobby is full' once the lobby's player
-        count equals MaxPlayers. Receives lobby events (player_join, player_leave,
-        player_say, lobby_starting) and the post-/start matchmaking handshake.
+        count equals MaxPlayers. If the lobby was created with a password, the joiner
+        must supply the matching value via the password query param. Receives lobby
+        events (player_join, player_leave, player_say, lobby_starting) and the post-/start
+        matchmaking handshake.
       parameters:
       - description: Lobby UUID returned by /lobby/host or /lobby/find
         in: query
         name: lobbyID
         required: true
+        type: string
+      - description: Required when the lobby is password-protected (see /lobby/find)
+        in: query
+        name: password
         type: string
       - description: JWT token (alternative to Authorization header)
         in: query

@@ -324,12 +324,13 @@ Lobbies are only available for games with `lobby_enabled=true` (default).
 ### Host a lobby
 
 ```
-GET /lobby/host?gameID=<uuid>&tags=tag1,tag2&metadata=<string>&token=<jwt>
+GET /lobby/host?gameID=<uuid>&tags=tag1,tag2&metadata=<string>&password=<string>&token=<jwt>
 ```
 
 Optional:
 - `tags` — comma-separated, **first 16 tags kept** (extras silently dropped, not rejected). Searchable via `/lobby/find`.
 - `metadata` — opaque string stored on the lobby record (visible to all joiners).
+- `password` — when set, joiners must supply the same value on `/lobby/join` to enter. Stored bcrypt-hashed; max 72 bytes (bcrypt's input limit). Only the boolean `password_protected` is exposed on `/lobby/find` — the hash never leaves the server.
 
 Upgrades to WebSocket. The connecting player **is** the host.
 
@@ -352,21 +353,24 @@ Response `200`:
       "metadata": "…",
       "players": 2,
       "max_players": 4,
-      "created_at": "…"
+      "created_at": "…",
+      "password_protected": false
     }
   ]
 }
 ```
 
-Filter is **AND** on tags — only lobbies that have *every* requested tag are returned.
+Filter is **AND** on tags — only lobbies that have *every* requested tag are returned. `password_protected` is `true` when the host created the lobby with a `password`; the hash itself is never returned.
 
 ### Join a lobby
 
 ```
-GET /lobby/join?lobbyID=<uuid>&token=<jwt>
+GET /lobby/join?lobbyID=<uuid>&password=<string>&token=<jwt>
 ```
 
 Upgrades to WebSocket.
+
+`password` is required only for lobbies whose `/lobby/find` entry has `password_protected: true`. A missing or wrong password is rejected with `{"status": "error", "error": "invalid password"}` (single message for both cases — by design, so probing can't distinguish "no password sent" from "wrong password"). The check runs before the capacity gate, so failed attempts never occupy a slot.
 
 ### Lobby messages (both host and player connections receive these)
 

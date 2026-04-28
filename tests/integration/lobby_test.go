@@ -337,6 +337,120 @@ func TestLobbyDisconnectCommandHost(t *testing.T) {
 	}
 }
 
+// TestLobbyPasswordProtection covers: host with password is advertised as
+// password_protected=true on /lobby/find, joins without/with the wrong
+// password are rejected, the correct password admits the joiner, and a
+// host without a password still admits a no-password joiner.
+func TestLobbyPasswordProtection(t *testing.T) {
+	h := NewHarness(t)
+
+	RegisterUser(t, h.BaseURL(), "pwowner", "pwowner@example.com", "pass")
+	ownerToken, _ := LoginUser(t, h.BaseURL(), "pwowner@example.com", "pass")
+	game := CreateGame(t, h.BaseURL(), ownerToken, "PwLobbyGame", 3)
+	gameID := game["id"].(string)
+
+	hostToken, _ := GuestLogin(t, h.BaseURL(), "pwhost")
+	const lobbyPw = "hunter2"
+	hostWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/host?gameID=%s&password=%s", h.BaseURL(), gameID, lobbyPw),
+		hostToken)
+	defer hostWS.Close()
+	hostHello := readJSONMsg(t, hostWS, 3*time.Second)
+	if hostHello["status"] != "lobby_joined" {
+		t.Fatalf("host: expected lobby_joined, got %+v", hostHello)
+	}
+	lobbyID := hostHello["lobby_id"].(string)
+
+	// /lobby/find advertises password_protected=true and never returns the hash.
+	findToken, _ := GuestLogin(t, h.BaseURL(), "pwfinder")
+	findResp := DoReq(t, "GET",
+		fmt.Sprintf("%s/lobby/find?gameID=%s", h.BaseURL(), gameID),
+		nil, findToken, http.StatusOK)
+	lobbies, _ := findResp["lobbies"].([]interface{})
+	if len(lobbies) != 1 {
+		t.Fatalf("find: expected 1 lobby, got %+v", findResp)
+	}
+	first := lobbies[0].(map[string]interface{})
+	if first["password_protected"] != true {
+		t.Errorf("find: expected password_protected=true, got %v", first["password_protected"])
+	}
+	if _, leaked := first["password_hash"]; leaked {
+		t.Errorf("find: password_hash leaked in response: %+v", first)
+	}
+	if _, leaked := first["password"]; leaked {
+		t.Errorf("find: password leaked in response: %+v", first)
+	}
+
+	// Missing password: rejected.
+	noPwTok, _ := GuestLogin(t, h.BaseURL(), "pwnopass")
+	noPwWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/join?lobbyID=%s", h.BaseURL(), lobbyID), noPwTok)
+	noPwResp := readJSONMsg(t, noPwWS, 3*time.Second)
+	noPwWS.Close()
+	if noPwResp["status"] != "error" {
+		t.Errorf("join without password: expected error, got %+v", noPwResp)
+	}
+	if !strings.Contains(fmt.Sprintf("%v", noPwResp["error"]), "password") {
+		t.Errorf("join without password: expected password error, got %v", noPwResp["error"])
+	}
+
+	// Wrong password: rejected.
+	wrongTok, _ := GuestLogin(t, h.BaseURL(), "pwwrong")
+	wrongWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/join?lobbyID=%s&password=nope", h.BaseURL(), lobbyID), wrongTok)
+	wrongResp := readJSONMsg(t, wrongWS, 3*time.Second)
+	wrongWS.Close()
+	if wrongResp["status"] != "error" {
+		t.Errorf("join with wrong password: expected error, got %+v", wrongResp)
+	}
+
+	// Correct password: admitted.
+	okTok, _ := GuestLogin(t, h.BaseURL(), "pwgoodjoiner")
+	okWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/join?lobbyID=%s&password=%s", h.BaseURL(), lobbyID, lobbyPw), okTok)
+	defer okWS.Close()
+	okResp := readJSONMsg(t, okWS, 3*time.Second)
+	if okResp["status"] != "lobby_joined" {
+		t.Fatalf("join with correct password: expected lobby_joined, got %+v", okResp)
+	}
+
+	// And a no-password lobby still ignores the password param entirely.
+	openHostTok, _ := GuestLogin(t, h.BaseURL(), "pwopenhost")
+	openHostWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/host?gameID=%s", h.BaseURL(), gameID), openHostTok)
+	defer openHostWS.Close()
+	openHostHello := readJSONMsg(t, openHostWS, 3*time.Second)
+	openLobbyID := openHostHello["lobby_id"].(string)
+
+	openFind := DoReq(t, "GET",
+		fmt.Sprintf("%s/lobby/find?gameID=%s", h.BaseURL(), gameID),
+		nil, findToken, http.StatusOK)
+	openLobbies, _ := openFind["lobbies"].([]interface{})
+	var openEntry map[string]interface{}
+	for _, l := range openLobbies {
+		m := l.(map[string]interface{})
+		if m["id"] == openLobbyID {
+			openEntry = m
+			break
+		}
+	}
+	if openEntry == nil {
+		t.Fatalf("find: open lobby missing from response: %+v", openFind)
+	}
+	if openEntry["password_protected"] != false {
+		t.Errorf("find: open lobby should report password_protected=false, got %v", openEntry["password_protected"])
+	}
+
+	openJoinerTok, _ := GuestLogin(t, h.BaseURL(), "pwopenjoiner")
+	openJoinWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/join?lobbyID=%s", h.BaseURL(), openLobbyID), openJoinerTok)
+	defer openJoinWS.Close()
+	openJoinResp := readJSONMsg(t, openJoinWS, 3*time.Second)
+	if openJoinResp["status"] != "lobby_joined" {
+		t.Errorf("join open lobby: expected lobby_joined, got %+v", openJoinResp)
+	}
+}
+
 func toWS(httpURL string) string {
 	if strings.HasPrefix(httpURL, "https://") {
 		return "wss://" + strings.TrimPrefix(httpURL, "https://")
