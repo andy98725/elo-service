@@ -455,6 +455,87 @@ Lobby capacity is enforced atomically server-side (Lua script in Redis), so two 
 
 ---
 
+## Per-player game data (settings, achievements, etc.)
+
+elo-service includes a tiny per-(game, player) JSON key-value store you can read and write from the client. It's intended for things like player settings, cosmetic preferences, or any state the client wants to persist server-side without standing up its own backend.
+
+Each (game, player) has **two independent namespaces** sharing the same key space:
+
+- **Player-authored** — you write these from the client. The game server can read them but can't modify them.
+- **Server-authored** — the game server writes these (achievements, levels, last seen score, etc.). You can read them from the client but can't modify them.
+
+The same key can exist in both namespaces with different values; they don't collide. That's why the read endpoints are split — you GET each side separately so you always know which half is authoritative.
+
+**Guests cannot use this feature.** All endpoints below require a registered-user JWT and return `401` for guest tokens. There's no persistent identity to attach data to once a guest token expires, so we don't try.
+
+### Read your own entries
+
+```http
+GET /games/{gameID}/data/me/player
+GET /games/{gameID}/data/me/server
+Authorization: Bearer <user token>
+```
+
+Both return:
+```json
+{ "entries": { "settings": {"audio": 0.7}, "color": "blue" } }
+```
+
+`entries` is a keyed object (not an array) — values are arbitrary JSON. Empty object `{}` if nothing's been written yet.
+
+### Write a player-authored entry
+
+```http
+PUT /games/{gameID}/data/me/{key}
+Authorization: Bearer <user token>
+Content-Type: application/json
+
+<arbitrary JSON value>
+```
+
+The request body **is** the value — no envelope, no `{"value": …}` wrapper. Examples:
+
+- `PUT …/me/settings` body `{"audio":0.7,"theme":"dark"}` → stored as that object.
+- `PUT …/me/last_seen_changelog` body `"2026-04-28"` → stored as that string.
+- `PUT …/me/level_progress` body `[1,2,3,4]` → stored as that array.
+
+Replaces any existing player-authored entry at the same key. Does not affect a server-authored entry at the same key.
+
+Response `200`: `{"status":"ok"}`.
+
+### Delete a player-authored entry
+
+```http
+DELETE /games/{gameID}/data/me/{key}
+Authorization: Bearer <user token>
+```
+
+Response `200` if the entry existed, `404` if it didn't. You can only delete entries you wrote (player-authored side); use the server's API to delete server-authored entries.
+
+### Limits & validation
+
+| Constraint | Limit |
+|---|---|
+| Key format | `[a-zA-Z0-9._-]{1,128}` — letters, digits, dot, underscore, hyphen, max 128 chars |
+| Value size | 64 KB serialized JSON |
+| Value format | Must be valid JSON. `null`, numbers, strings, arrays, objects all OK. Empty body is rejected. |
+
+Error codes:
+- `400` — key doesn't match the regex, or body isn't valid JSON.
+- `401` — missing token, or you sent a guest token.
+- `404` — DELETE on a key that doesn't exist.
+- `413` — value larger than 64 KB.
+
+### Use cases
+
+- **Settings** — controls, audio, accessibility. Player-authored, persisted across sessions/devices.
+- **Last-seen markers** — "I've seen the changelog through 2026-04-28," "I've dismissed tutorial X."
+- **Server-issued state** — your game server can publish achievements, current level, cosmetic unlocks; the client reads these via `…/me/server` to render UI without separately tracking them.
+
+For game-server-side writes (achievements, ratings beyond Elo, anything the server should be authoritative on), see the corresponding section in `elo-service-server.md`.
+
+---
+
 ## Standard error response (HTTP endpoints)
 
 Non-WebSocket failures return:
@@ -500,6 +581,10 @@ WebSocket failures use the in-band `{"status": "error", "error": …}` frame ins
 | `GET`  | `/results/{matchID}/logs` | user/guest | Download match logs (if public) |
 | `GET`  | `/game/{gameID}/results` | user/guest | Paginated results for a game |
 | `GET`  | `/user/results` | user/guest | Your own match history |
+| `GET`  | `/games/{gameID}/data/me/player` | user | Your player-authored entries for this game |
+| `GET`  | `/games/{gameID}/data/me/server` | user | Server-authored entries about you for this game |
+| `PUT`  | `/games/{gameID}/data/me/{key}` | user | Upsert a player-authored entry |
+| `DELETE` | `/games/{gameID}/data/me/{key}` | user | Delete a player-authored entry |
 
 Full request/response schemas are in the OpenAPI spec at `/swagger/index.html`.
 

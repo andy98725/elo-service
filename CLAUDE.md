@@ -62,6 +62,20 @@ Single in-process goroutine in [`src/worker/worker.go`](src/worker/worker.go). T
 
 [`src/worker/matchmaking/warmPool.go`](src/worker/matchmaking/warmPool.go) keeps at least `HCLOUD_WARM_SLOTS` container slots ready across already-provisioned hosts (capped by `HCLOUD_MAX_HOSTS`). Runs at startup and on every GC tick. With `HCLOUD_WARM_SLOTS=0`, every match pays cold-start (~30-60 s). Currently set to `1` on the staging Fly app.
 
+### Per-(game, player) data store
+
+[`src/api/playerData/`](src/api/playerData/) implements a dynamic per-(game, player) JSON KV backend that game servers can write to and players can read + write. The model is one table — [`PlayerGameEntry`](src/models/player_game_entry.go) — with PK `(game_id, player_id, key, server_authored)`. Putting `server_authored` in the PK gives two independent namespaces sharing a (game, player): a player-authored entry and a server-authored entry can both exist at the same key without collision.
+
+**Auth:** route-based, not per-row. The route the request comes in on dictates which namespace it touches.
+- Player-side routes (`/games/:gameID/data/me/...`) require user JWT auth (`RequireUserAuth`). They read both halves but only write `server_authored = false`.
+- Server-side routes (`/games/:gameID/data/:playerID/...`) require the active match's `auth_code` in the `Authorization: Bearer <code>` header — same code the game server uses for `/result/report`. The `requireMatchAuth` helper in [`serverSide.go`](src/api/playerData/serverSide.go) resolves the match, verifies it's still underway, that the URL `gameID` matches, and that `playerID` is in the match's `Players`. Server routes write `server_authored = true` only.
+
+**Guests are intentionally rejected.** Guest IDs are not persisted in `users` (no row, no FK target, no recovery path when the ephemeral token is lost), and anyone can mint one for free. Player-side routes refuse the guest JWT (`RequireUserAuth` doesn't accept it). Server-side routes refuse a `:playerID` that starts with `g_` (400). The game server can still observe guests in its match via `Match.GuestIDs` — only KV writes for them are blocked.
+
+**Limits:** key matches `[a-zA-Z0-9._-]{1,128}`, value is any valid JSON up to 64KB. Both enforced in handlers (not the schema), so they can be changed without a migration. List endpoints return all entries for the (game, player, side) — no pagination yet; revisit if a single (game, player) starts accumulating hundreds of keys.
+
+**Lifecycle:** `Game` and `Player` FKs are `OnDelete:CASCADE`, so deleting a game or user cleans up its entries. **Postgres-only** — the SQLite test harness does not enable `PRAGMA foreign_keys`, so the cascade is not exercised in integration tests; verify in a real Postgres run when changing the FK behavior.
+
 ### Singletons
 
 `server.S` is a package-level global ([`src/server/server.go`](src/server/server.go)) holding the DB, Redis, AWS, Hetzner, and (eventually) DNS/Cert clients. Models reach into `server.S.DB` directly — there is no repository abstraction. The Hetzner client is wired through the [`MachineService`](src/server/interfaces.go) interface so integration tests can inject a mock that simulates the agent.

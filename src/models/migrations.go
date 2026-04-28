@@ -59,7 +59,7 @@ func Migrate() error {
 	if err := m.Migrate(); err != nil {
 		return err
 	}
-	if err := server.S.DB.AutoMigrate(&User{}, &Game{}, &Match{}, &MatchResult{}, &MachineHost{}, &ServerInstance{}); err != nil {
+	if err := server.S.DB.AutoMigrate(&User{}, &Game{}, &Match{}, &MatchResult{}, &MachineHost{}, &ServerInstance{}, &PlayerGameEntry{}); err != nil {
 		return err
 	}
 

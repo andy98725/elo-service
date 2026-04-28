@@ -10,6 +10,7 @@ package integration
 
 import (
 	"fmt"
+	"reflect"
 	"sync"
 
 	"github.com/andy98725/elo-service/src/models"
@@ -116,6 +117,18 @@ func migrateForSQLite(db *gorm.DB) error {
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (player_id, game_id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS player_game_entries (
+			game_id TEXT NOT NULL,
+			player_id TEXT NOT NULL,
+			key TEXT NOT NULL,
+			server_authored INTEGER NOT NULL,
+			value TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (game_id, player_id, key, server_authored),
+			FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+			FOREIGN KEY (player_id) REFERENCES users(id) ON DELETE CASCADE
+		)`,
 	}
 	for _, stmt := range stmts {
 		if err := db.Exec(stmt).Error; err != nil {
@@ -127,15 +140,29 @@ func migrateForSQLite(db *gorm.DB) error {
 		if tx.Statement.Schema == nil {
 			return
 		}
-		for _, field := range tx.Statement.Schema.PrimaryFields {
-			if field.DBName != "id" {
-				continue
-			}
-			val, isZero := field.ValueOf(tx.Statement.Context, tx.Statement.ReflectValue)
-			if isZero || val == nil || val == "" {
-				field.Set(tx.Statement.Context, tx.Statement.ReflectValue, uuid.New().String())
+		setOne := func(rv reflect.Value) {
+			for _, field := range tx.Statement.Schema.PrimaryFields {
+				if field.DBName != "id" {
+					continue
+				}
+				val, isZero := field.ValueOf(tx.Statement.Context, rv)
+				if isZero || val == nil || val == "" {
+					field.Set(tx.Statement.Context, rv, uuid.New().String())
+				}
 			}
 		}
+		// GORM may call us with a single struct OR a slice (the latter
+		// happens during saveAssociations — e.g. Match.Players). Handle
+		// both so test runs with multiple registered users in a match
+		// don't panic in field.ValueOf.
+		rv := tx.Statement.ReflectValue
+		if rv.Kind() == reflect.Slice {
+			for i := 0; i < rv.Len(); i++ {
+				setOne(rv.Index(i))
+			}
+			return
+		}
+		setOne(rv)
 	})
 
 	return assertSchemaMatchesModels(db)
@@ -152,6 +179,7 @@ func assertSchemaMatchesModels(db *gorm.DB) error {
 		&models.User{}, &models.Game{}, &models.Match{},
 		&models.MatchResult{}, &models.Rating{},
 		&models.MachineHost{}, &models.ServerInstance{},
+		&models.PlayerGameEntry{},
 	}
 	for _, m := range checks {
 		s, err := schema.Parse(m, cache, ns)

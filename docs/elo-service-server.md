@@ -146,6 +146,100 @@ The player ID is **not cryptographically signed** at connect time. A determined 
 
 ---
 
+## Per-player game data (achievements, progression, server-authored state)
+
+elo-service includes a per-(game, player) JSON key-value store you can use as a minimal backend — store achievements, level progression, last-known scores, server-issued cosmetic unlocks, anything you want the player's client to be able to read without standing up your own database.
+
+Each (game, player) row has **two independent namespaces** sharing the same key space:
+
+- **Server-authored** — you write these from your container. The player's client can read them but can't modify them.
+- **Player-authored** — the client writes these (settings, preferences). You can read them but can't modify them.
+
+The same key can exist in both namespaces with independent values; they don't collide. Use server-authored for anything the player shouldn't be able to forge (achievement unlocks, rating-adjacent state, etc.) and let the client read it via the player-side API documented in `elo-service-client.md`.
+
+### Auth: reuse your match token
+
+All four endpoints below require **the same `-token` value you got in argv**, passed as `Authorization: Bearer <token>`. The matchmaker:
+
+- Resolves the token to a match.
+- Confirms the match is still underway (the row is deleted at end-of-match — auth fails after that).
+- Confirms the URL `gameID` matches the match's game.
+- Confirms the URL `playerID` is one of the players in your match.
+- Rejects guest player IDs (`g_…`) with `400` — guests are intentionally unsupported on this feature.
+
+So you can only read or write data for players in **your current match**, and only while the match is underway. There is no long-lived per-game credential to manage.
+
+### Read a player's data
+
+```http
+GET https://elomm.net/games/{gameID}/data/{playerID}/player
+GET https://elomm.net/games/{gameID}/data/{playerID}/server
+Authorization: Bearer <your -token value>
+```
+
+Both return the same shape:
+```json
+{ "entries": { "achievements.first_win": {"at":"2026-04-28"}, "level": 12 } }
+```
+
+`entries` is a keyed object — values are arbitrary JSON. Empty object `{}` if the player has no entries on that side.
+
+Use the `…/player` endpoint to read what the player wrote (settings, preferences); use the `…/server` endpoint to read what your previous matches wrote (carried-over progression, achievements, etc.).
+
+### Upsert a server-authored entry
+
+```http
+PUT https://elomm.net/games/{gameID}/data/{playerID}/{key}
+Authorization: Bearer <your -token value>
+Content-Type: application/json
+
+<arbitrary JSON value>
+```
+
+The request body **is** the value — no envelope. Examples you might write at end-of-match:
+
+- `PUT …/player-uuid/achievements.first_win` body `{"at":"2026-04-28","match_id":"…"}` — grant an achievement.
+- `PUT …/player-uuid/level` body `13` — bump player level.
+- `PUT …/player-uuid/last_match_score` body `{"score":4200,"placement":1}` — store a stat the client can render.
+
+Replaces any existing server-authored entry at the same key. Does not touch a player-authored entry at the same key.
+
+Response `200`: `{"status":"ok"}`.
+
+### Delete a server-authored entry
+
+```http
+DELETE https://elomm.net/games/{gameID}/data/{playerID}/{key}
+Authorization: Bearer <your -token value>
+```
+
+Response `200` if the entry existed, `404` if it didn't. Server can only delete server-authored entries; the player owns the player-authored side.
+
+### Limits & validation
+
+| Constraint | Limit |
+|---|---|
+| Key format | `[a-zA-Z0-9._-]{1,128}` — letters, digits, dot, underscore, hyphen, max 128 chars |
+| Value size | 64 KB serialized JSON |
+| Value format | Must be valid JSON |
+
+Error codes:
+- `400` — key doesn't match the regex, body isn't valid JSON, or `playerID` is a guest (`g_…`).
+- `401` — token missing or no longer resolves (match has ended).
+- `403` — `gameID` in the URL doesn't match the match's game, or `playerID` isn't in your match.
+- `404` — DELETE on a key that doesn't exist.
+- `413` — value larger than 64 KB.
+
+### Patterns
+
+- **Grant on result** — write achievements / level deltas in the same critical section as your `POST /result/report`. Order doesn't matter; both endpoints take the same `-token`. Just remember the match auth dies the moment you POST the result, so do the data writes first or be ready to handle 401 on the trailing one.
+- **Carry-over state** — at match start, `GET …/{playerID}/server` for each player to load their persisted level/progression before the game begins. Write back at end-of-match.
+- **Read-modify-write races** — full-blob writes; if two of your servers write the same key concurrently, last write wins. For counter-style state that needs atomicity, you'll need to add your own server-side merge logic (or model achievements as separate keys per achievement, which sidesteps the issue).
+
+For the player-side read/write API (settings, etc.), see `elo-service-client.md`.
+
+---
+
 ## Registering your game
 
 Before your image can be used, register a `Game` record. This requires a registered (non-guest) user account **with the `can_create_game` flag set**. The flag defaults to `false` for new accounts and is admin-grantable only — if you've just signed up, **this requires admin assistance**. Without it the call returns `403 "user is not allowed to create games"`.
@@ -304,5 +398,9 @@ You don't need to expose a `/health` endpoint of your own (though `example-game-
 | `PUT`  | `/game/{id}` | game owner | Update game config |
 | `DELETE` | `/game/{id}` | game owner | Delete a game |
 | `GET`  | `/results/{matchID}/logs` | user/guest | Download container stdout (if public) |
+| `GET`  | `/games/{gameID}/data/{playerID}/player` | match token | Read player-authored entries |
+| `GET`  | `/games/{gameID}/data/{playerID}/server` | match token | Read server-authored entries |
+| `PUT`  | `/games/{gameID}/data/{playerID}/{key}` | match token | Upsert a server-authored entry |
+| `DELETE` | `/games/{gameID}/data/{playerID}/{key}` | match token | Delete a server-authored entry |
 
 Full schemas: `https://elomm.net/swagger/index.html`.

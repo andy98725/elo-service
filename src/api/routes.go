@@ -7,6 +7,7 @@ import (
 	"github.com/andy98725/elo-service/src/api/lobby"
 	"github.com/andy98725/elo-service/src/api/match"
 	"github.com/andy98725/elo-service/src/api/matchResults"
+	"github.com/andy98725/elo-service/src/api/playerData"
 	"github.com/andy98725/elo-service/src/api/rating"
 	"github.com/andy98725/elo-service/src/api/user"
 
@@ -45,6 +46,9 @@ func InitRoutes(e *echo.Echo) error {
 		return err
 	}
 	if err := rating.InitRoutes(e); err != nil {
+		return err
+	}
+	if err := playerData.InitRoutes(e); err != nil {
 		return err
 	}
 
