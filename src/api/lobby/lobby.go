@@ -13,6 +13,7 @@ import (
 	"github.com/andy98725/elo-service/src/api/wsliveness"
 	"github.com/andy98725/elo-service/src/external/redis"
 	"github.com/andy98725/elo-service/src/models"
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/andy98725/elo-service/src/server"
 	"github.com/andy98725/elo-service/src/util"
 	"github.com/andy98725/elo-service/src/worker/matchmaking"
@@ -84,6 +85,12 @@ func HostLobby(ctx echo.Context) error {
 		return nil
 	}
 
+	// Subscribe BEFORE telling the client they're in. Otherwise the client
+	// can act on lobby_joined (e.g. trigger another player to /disconnect)
+	// before our SUBSCRIBE has reached Redis, and the resulting publish is
+	// silently dropped.
+	subs := openLobbySubs(rctx, rec, id)
+
 	conn.WriteJSON(echo.Map{
 		"status":      "lobby_joined",
 		"lobby_id":    rec.ID,
@@ -95,7 +102,7 @@ func HostLobby(ctx echo.Context) error {
 		"players":     1,
 	})
 
-	runLobbySession(ctx, conn, rec, game, id, name, true)
+	runLobbySession(ctx, conn, rec, game, id, name, true, subs)
 
 	// Host departure tears down the lobby (unless /start already deleted it).
 	server.S.Redis.RemoveLobbyPlayer(context.Background(), rec.ID, id)
@@ -149,6 +156,12 @@ func JoinLobby(ctx echo.Context) error {
 		return nil
 	}
 
+	// Subscribe BEFORE the player_join publish and the lobby_joined ack,
+	// so any subsequent publish on this channel (e.g. host /disconnect a
+	// few ms after we joined) is reliably observed. See HostLobby for the
+	// full rationale.
+	subs := openLobbySubs(rctx, rec, id)
+
 	server.S.Redis.PublishLobbyEvent(rctx, lobbyID,
 		mustJSON(lobbyEvent{Event: "player_join", ID: id, Name: name}))
 
@@ -164,7 +177,7 @@ func JoinLobby(ctx echo.Context) error {
 		"players":     len(players),
 	})
 
-	runLobbySession(ctx, conn, rec, game, id, name, false)
+	runLobbySession(ctx, conn, rec, game, id, name, false, subs)
 
 	server.S.Redis.RemoveLobbyPlayer(context.Background(), lobbyID, id)
 	server.S.Redis.PublishLobbyEvent(context.Background(), lobbyID,
@@ -172,8 +185,27 @@ func JoinLobby(ctx echo.Context) error {
 	return nil
 }
 
+// lobbySubs bundles the three pubsub subscriptions a lobby session reads
+// from. They are opened by the caller (HostLobby/JoinLobby) BEFORE the
+// lobby_joined message goes out, so the client cannot race the SUBSCRIBE
+// landing at Redis.
+type lobbySubs struct {
+	events *goredis.PubSub
+	match  *goredis.PubSub
+	kick   *goredis.PubSub
+}
+
+func openLobbySubs(ctx context.Context, rec *redis.LobbyRecord, playerID string) *lobbySubs {
+	return &lobbySubs{
+		events: server.S.Redis.WatchLobbyEvents(ctx, rec.ID),
+		match:  server.S.Redis.WatchMatchReady(ctx, rec.GameID, playerID),
+		kick:   server.S.Redis.WatchLobbyKick(ctx, rec.ID, playerID),
+	}
+}
+
 // runLobbySession runs the connected client's read loop and event fan-out.
-// It returns once the connection terminates for any reason.
+// It returns once the connection terminates for any reason. Owns the
+// lifetime of subs (closes them on return).
 func runLobbySession(
 	ctx echo.Context,
 	conn *websocket.Conn,
@@ -181,14 +213,15 @@ func runLobbySession(
 	game *models.Game,
 	playerID, playerName string,
 	isHost bool,
+	subs *lobbySubs,
 ) {
 	reqCtx := ctx.Request().Context()
 
-	eventsSub := server.S.Redis.WatchLobbyEvents(reqCtx, rec.ID)
+	eventsSub := subs.events
 	defer eventsSub.Close()
-	matchSub := server.S.Redis.WatchMatchReady(reqCtx, rec.GameID, playerID)
+	matchSub := subs.match
 	defer matchSub.Close()
-	kickSub := server.S.Redis.WatchLobbyKick(reqCtx, rec.ID, playerID)
+	kickSub := subs.kick
 	defer kickSub.Close()
 
 	ttlChan := lobbyTTLRefresh(reqCtx, rec.ID, playerID)

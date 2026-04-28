@@ -149,3 +149,5 @@ Notable tunables:
 - `409 Conflict` — uniqueness violation on create (game name, username, email).
 - `400 Bad Request` — missing required fields, malformed input.
 - `500` is reserved for actual internal errors.
+
+**Pubsub Subscribe is async — confirm before relying on it.** `Client.Subscribe()` (both real Redis and miniredis) returns immediately; the SUBSCRIBE doesn't necessarily reach the server before the next line of code runs. Any publish in that window is silently dropped. The `Watch*` helpers in [`src/external/redis/`](src/external/redis/) wrap their `Subscribe` calls in a `PubSubNumSub` poll that blocks until the subscriber count includes us — use these (not raw `Client.Subscribe`) so callers don't have to think about it. Equally important: subscribe BEFORE writing client-visible state (e.g. `lobby_joined`, `queue_joined`) — otherwise the client can act on the welcome message and trigger a publish that races our own SUBSCRIBE. See [`openLobbySubs`](src/api/lobby/lobby.go) for the lobby flow's solution.

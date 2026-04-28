@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -209,7 +210,9 @@ func (r *Redis) PublishLobbyEvent(ctx context.Context, lobbyID, payload string) 
 }
 
 func (r *Redis) WatchLobbyEvents(ctx context.Context, lobbyID string) *redis.PubSub {
-	return r.Client.Subscribe(ctx, lobbyEventChannel(lobbyID))
+	sub := r.Client.Subscribe(ctx, lobbyEventChannel(lobbyID))
+	r.waitForSubscribeAck(ctx, lobbyEventChannel(lobbyID), "lobby_events", lobbyID)
+	return sub
 }
 
 func (r *Redis) PublishLobbyKick(ctx context.Context, lobbyID, playerID, reason string) error {
@@ -217,7 +220,42 @@ func (r *Redis) PublishLobbyKick(ctx context.Context, lobbyID, playerID, reason 
 }
 
 func (r *Redis) WatchLobbyKick(ctx context.Context, lobbyID, playerID string) *redis.PubSub {
-	return r.Client.Subscribe(ctx, lobbyKickChannel(lobbyID, playerID))
+	sub := r.Client.Subscribe(ctx, lobbyKickChannel(lobbyID, playerID))
+	r.waitForSubscribeAck(ctx, lobbyKickChannel(lobbyID, playerID), "lobby_kick", lobbyID+"_"+playerID)
+	return sub
+}
+
+// waitForSubscribeAck blocks (with a short bounded timeout) until Redis
+// has confirmed the SUBSCRIBE — i.e. until publishes to this subscription
+// will actually be observed via .Channel(). Without this, Subscribe is
+// effectively async: the call returns immediately, and a publish that
+// races the SUBSCRIBE landing at the server is silently dropped.
+//
+// We use PubSubNumSub rather than sub.Receive because the latter reads a
+// single frame from the connection — that races the .Channel() goroutine
+// which is also trying to consume frames. NumSub asks the server "how
+// many subscribers does this channel have right now," which is a
+// different call entirely and doesn't perturb the connection.
+//
+// On timeout (or any other error) we log and return: the caller still
+// gets a *PubSub, just with the same flaky behavior as before. The bound
+// is short because we're racing the caller's first publish; if Redis
+// hasn't acked in 2 seconds something is wrong.
+func (r *Redis) waitForSubscribeAck(ctx context.Context, channel, kind, id string) {
+	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	for {
+		counts, err := r.Client.PubSubNumSub(waitCtx, channel).Result()
+		if err == nil && counts[channel] >= 1 {
+			return
+		}
+		select {
+		case <-waitCtx.Done():
+			slog.Warn("subscribe ack timed out", "kind", kind, "id", id, "error", waitCtx.Err())
+			return
+		case <-time.After(2 * time.Millisecond):
+		}
+	}
 }
 
 func (r *Redis) AllLobbyIndexKeys(ctx context.Context) ([]string, error) {
