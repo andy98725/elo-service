@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var upgrader = websocket.Upgrader{
@@ -36,6 +37,7 @@ var upgrader = websocket.Upgrader{
 // @Param        gameID   query string true  "Game UUID"
 // @Param        tags     query string false "Comma-separated tags advertised to /lobby/find (max 16)"
 // @Param        metadata query string false "Opaque metadata stored on the lobby record"
+// @Param        password query string false "Optional password; joiners must supply the same value to enter"
 // @Param        token    query string false "JWT token (alternative to Authorization header)"
 // @Router       /lobby/host [get]
 func HostLobby(ctx echo.Context) error {
@@ -63,15 +65,33 @@ func HostLobby(ctx echo.Context) error {
 		return nil
 	}
 
+	// bcrypt's input is capped at 72 bytes; reject longer passwords up front
+	// rather than silently truncating.
+	password := ctx.QueryParam("password")
+	if len(password) > 72 {
+		conn.WriteJSON(echo.Map{"status": "error", "error": "password too long (max 72 bytes)"})
+		return nil
+	}
+	var passwordHash string
+	if password != "" {
+		h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			conn.WriteJSON(echo.Map{"status": "error", "error": "failed to hash password"})
+			return nil
+		}
+		passwordHash = string(h)
+	}
+
 	rec := &redis.LobbyRecord{
-		ID:         uuid.New().String(),
-		GameID:     gameID,
-		HostID:     id,
-		HostName:   name,
-		Tags:       parseTags(ctx.QueryParam("tags")),
-		Metadata:   ctx.QueryParam("metadata"),
-		MaxPlayers: game.LobbySize,
-		CreatedAt:  time.Now().UTC(),
+		ID:           uuid.New().String(),
+		GameID:       gameID,
+		HostID:       id,
+		HostName:     name,
+		Tags:         parseTags(ctx.QueryParam("tags")),
+		Metadata:     ctx.QueryParam("metadata"),
+		MaxPlayers:   game.LobbySize,
+		CreatedAt:    time.Now().UTC(),
+		PasswordHash: passwordHash,
 	}
 
 	rctx := ctx.Request().Context()
@@ -114,11 +134,12 @@ func HostLobby(ctx echo.Context) error {
 
 // JoinLobby godoc
 // @Summary      Join a lobby (WebSocket)
-// @Description  Upgrades to a WebSocket and joins an existing lobby. Capacity is enforced atomically; rejects with 'lobby is full' once the lobby's player count equals MaxPlayers. Receives lobby events (player_join, player_leave, player_say, lobby_starting) and the post-/start matchmaking handshake.
+// @Description  Upgrades to a WebSocket and joins an existing lobby. Capacity is enforced atomically; rejects with 'lobby is full' once the lobby's player count equals MaxPlayers. If the lobby was created with a password, the joiner must supply the matching value via the password query param. Receives lobby events (player_join, player_leave, player_say, lobby_starting) and the post-/start matchmaking handshake.
 // @Tags         Lobby
 // @Security     BearerAuth
-// @Param        lobbyID query string true  "Lobby UUID returned by /lobby/host or /lobby/find"
-// @Param        token   query string false "JWT token (alternative to Authorization header)"
+// @Param        lobbyID  query string true  "Lobby UUID returned by /lobby/host or /lobby/find"
+// @Param        password query string false "Required when the lobby is password-protected (see /lobby/find)"
+// @Param        token    query string false "JWT token (alternative to Authorization header)"
 // @Router       /lobby/join [get]
 func JoinLobby(ctx echo.Context) error {
 	conn, err := upgrader.Upgrade(ctx.Response(), ctx.Request(), nil)
@@ -145,6 +166,17 @@ func JoinLobby(ctx echo.Context) error {
 	if err != nil {
 		conn.WriteJSON(echo.Map{"status": "error", "error": "game not found"})
 		return nil
+	}
+
+	// Password gate runs before the capacity Lua so failed attempts don't
+	// touch the player set. Single error message for missing/wrong password
+	// to avoid leaking which lobbies exist with which passwords.
+	if rec.PasswordHash != "" {
+		supplied := ctx.QueryParam("password")
+		if supplied == "" || bcrypt.CompareHashAndPassword([]byte(rec.PasswordHash), []byte(supplied)) != nil {
+			conn.WriteJSON(echo.Map{"status": "error", "error": "invalid password"})
+			return nil
+		}
 	}
 
 	if err := server.S.Redis.AddLobbyPlayerWithCap(rctx, lobbyID, id, name, rec.MaxPlayers, LOBBY_PLAYER_TTL); err != nil {
