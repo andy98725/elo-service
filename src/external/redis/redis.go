@@ -91,6 +91,11 @@ func (r *Redis) AddPlayerToQueueWithTTL(ctx context.Context, gameID string, play
 		pipe.RPush(ctx, "queue_"+gameID, playerID)
 		// Set individual TTL for this player
 		pipe.Set(ctx, "player_queue_"+gameID+"_"+playerID, "1", ttl)
+		// Record join timestamp for rating-based matchmaking's
+		// wait-window expansion. Stored on every queue (not just rating
+		// games) so that toggling MatchmakingStrategy on a game doesn't
+		// leave stale entries with no timestamp.
+		pipe.HSet(ctx, "qjoined_"+gameID, playerID, time.Now().Unix())
 		if _, err := pipe.Exec(ctx); err != nil {
 			return err
 		}
@@ -118,6 +123,7 @@ func (r *Redis) RemovePlayerFromQueue(ctx context.Context, gameID string, player
 	pipe.LRem(ctx, "queue_"+gameID, 1, playerID)
 	// Also remove the individual player TTL key
 	pipe.Del(ctx, "player_queue_"+gameID+"_"+playerID)
+	pipe.HDel(ctx, "qjoined_"+gameID, playerID)
 	_, err = pipe.Exec(ctx)
 	return err
 }
@@ -141,14 +147,70 @@ func (r *Redis) AllPlayersInQueue(ctx context.Context, gameID string) ([]string,
 }
 
 func (r *Redis) PopPlayersFromQueue(ctx context.Context, gameID string, count int) ([]string, error) {
-	return r.Client.LPopCount(ctx, "queue_"+gameID, count).Result()
+	players, err := r.Client.LPopCount(ctx, "queue_"+gameID, count).Result()
+	if err != nil {
+		return nil, err
+	}
+	if len(players) > 0 {
+		fields := make([]string, len(players))
+		copy(fields, players)
+		_ = r.Client.HDel(ctx, "qjoined_"+gameID, fields...).Err()
+	}
+	return players, nil
 }
+
+// RemovePlayersFromQueue removes a specific set of players from a queue and
+// drops their TTL + join-time records. Used by rating-based matchmaking,
+// which selects pairs by rating window rather than popping the front of
+// the list.
+func (r *Redis) RemovePlayersFromQueue(ctx context.Context, gameID string, playerIDs []string) error {
+	if len(playerIDs) == 0 {
+		return nil
+	}
+	pipe := r.Client.Pipeline()
+	for _, p := range playerIDs {
+		pipe.LRem(ctx, "queue_"+gameID, 1, p)
+		pipe.Del(ctx, "player_queue_"+gameID+"_"+p)
+	}
+	fields := make([]string, len(playerIDs))
+	copy(fields, playerIDs)
+	pipe.HDel(ctx, "qjoined_"+gameID, fields...)
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+// QueueJoinTimes returns the unix-second join timestamps for every player
+// currently tracked in the queue's qjoined hash. Players missing from the
+// hash (e.g. left over from a queue that pre-dates the hash) are simply
+// absent — the caller should treat that as "joined long enough ago that
+// the window is fully expanded."
+func (r *Redis) QueueJoinTimes(ctx context.Context, gameID string) (map[string]int64, error) {
+	raw, err := r.Client.HGetAll(ctx, "qjoined_"+gameID).Result()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(raw))
+	for k, v := range raw {
+		var ts int64
+		fmt.Sscanf(v, "%d", &ts)
+		out[k] = ts
+	}
+	return out, nil
+}
+
 func (r *Redis) PushPlayersToQueue(ctx context.Context, gameID string, playerIDs []string) error {
 	interfacePlayers := make([]interface{}, len(playerIDs))
 	for i, p := range playerIDs {
 		interfacePlayers[i] = p
 	}
-	return r.Client.RPush(ctx, "queue_"+gameID, interfacePlayers...).Err()
+	pipe := r.Client.Pipeline()
+	pipe.RPush(ctx, "queue_"+gameID, interfacePlayers...)
+	now := time.Now().Unix()
+	for _, p := range playerIDs {
+		pipe.HSetNX(ctx, "qjoined_"+gameID, p, now)
+	}
+	_, err := pipe.Exec(ctx)
+	return err
 }
 
 func (r *Redis) GameQueueSize(ctx context.Context, gameID string) (int64, error) {

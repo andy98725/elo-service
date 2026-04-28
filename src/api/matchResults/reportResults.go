@@ -13,10 +13,11 @@ import (
 )
 
 type ReportResultsRequest struct {
-	TokenID   string   `json:"token_id"`
-	WinnerID  string   `json:"winner_id"`
-	WinnerIDs []string `json:"winner_ids"`
-	Reason    string   `json:"reason"`
+	TokenID       string   `json:"token_id"`
+	WinnerID      string   `json:"winner_id"`
+	WinnerIDs     []string `json:"winner_ids"`
+	Reason        string   `json:"reason"`
+	AdjustRatings *bool    `json:"adjust_ratings"`
 }
 
 // ReportResults godoc
@@ -45,14 +46,18 @@ func ReportResults(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "Match not found")
 	}
 
-	status, err := EndMatch(c.Request().Context(), match, req.WinnerIDs, req.Reason)
+	adjustRatings := true
+	if req.AdjustRatings != nil {
+		adjustRatings = *req.AdjustRatings
+	}
+	status, err := EndMatch(c.Request().Context(), match, req.WinnerIDs, req.Reason, adjustRatings)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to end match")
 	}
 	return c.JSON(http.StatusOK, echo.Map{"message": status})
 }
 
-func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reason string) (string, error) {
+func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reason string, adjustRatings bool) (string, error) {
 	if isUnderway, err := models.IsMatchUnderway(match.ID); err != nil {
 		return "", err
 	} else if !isUnderway {
@@ -75,7 +80,7 @@ func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reas
 			status = "Failed to save match logs"
 		}
 
-		if _, err := models.MatchEnded(match.ID, winnerIDs, reason, logsKey); err != nil {
+		if _, err := models.MatchEnded(match.ID, winnerIDs, reason, logsKey, adjustRatings); err != nil {
 			slog.Error("Failed to record match result", "error", err, "matchID", match.ID)
 			return "", err
 		}
@@ -97,7 +102,7 @@ func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reas
 
 		go tryDeleteIdleHost(&si.MachineHost)
 	} else {
-		if _, err := models.MatchEnded(match.ID, winnerIDs, reason, ""); err != nil {
+		if _, err := models.MatchEnded(match.ID, winnerIDs, reason, "", adjustRatings); err != nil {
 			slog.Error("Failed to record match result", "error", err, "matchID", match.ID)
 			return "", err
 		}

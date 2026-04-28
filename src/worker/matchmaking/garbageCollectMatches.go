@@ -66,7 +66,7 @@ func GarbageCollectMatches(ctx context.Context) error {
 		for _, match := range matches {
 			if time.Since(match.CreatedAt) > MATCH_MAX_DURATION {
 				slog.Info("Match timed out", "matchID", match.ID, "serverInstanceID", match.ServerInstanceID)
-				if _, err := matchResults.EndMatch(ctx, &match, []string{}, "timeout"); err != nil {
+				if _, err := matchResults.EndMatch(ctx, &match, []string{}, "timeout", false); err != nil {
 					slog.Error("Failed to end timed-out match", "error", err, "matchID", match.ID)
 				}
 			}

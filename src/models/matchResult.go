@@ -48,7 +48,7 @@ func (m *MatchResult) ToResp() *MatchResultResp {
 	}
 }
 
-func MatchEnded(matchID string, winnerIDs []string, result string, logsKey string) (*MatchResult, error) {
+func MatchEnded(matchID string, winnerIDs []string, result string, logsKey string, adjustRatings bool) (*MatchResult, error) {
 	match, err := GetMatch(matchID)
 	if err != nil {
 		return nil, err
@@ -62,9 +62,11 @@ func MatchEnded(matchID string, winnerIDs []string, result string, logsKey strin
 		Result:    result,
 		LogsKey:   logsKey,
 	}
-	slog.Info("Match ended", "matchID", matchID, "winnerIDs", winnerIDs, "result", result, "logsKey", logsKey)
+	slog.Info("Match ended", "matchID", matchID, "winnerIDs", winnerIDs, "result", result, "logsKey", logsKey, "adjustRatings", adjustRatings)
 
-	// Report result and delete match in one transaction
+	// Report result, delete match, and (if applicable) update ratings in one
+	// transaction so the rating delta cannot drift from the result that
+	// justified it.
 	err = server.S.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(matchResult).Error; err != nil {
 			return err
@@ -72,6 +74,17 @@ func MatchEnded(matchID string, winnerIDs []string, result string, logsKey strin
 
 		if err := tx.Delete(&Match{ID: matchID}).Error; err != nil {
 			return err
+		}
+
+		if adjustRatings && match.Game.ELOStrategy == ELO_STRATEGY_CLASSIC {
+			playerIDs := make([]string, 0, len(match.Players)+len(match.GuestIDs))
+			for _, p := range match.Players {
+				playerIDs = append(playerIDs, p.ID)
+			}
+			playerIDs = append(playerIDs, []string(match.GuestIDs)...)
+			if err := ApplyClassicElo(tx, &match.Game, playerIDs, winnerIDs); err != nil {
+				return err
+			}
 		}
 
 		return nil

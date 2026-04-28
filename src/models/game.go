@@ -42,6 +42,7 @@ type Game struct {
 	MatchmakingMachinePorts pq.Int64Array `json:"matchmaking_machine_ports" gorm:"type:integer[];default:'{}'"`
 	ELOStrategy             string        `json:"elo_strategy" gorm:"not null;default:'unranked'"`
 	DefaultRating           int           `json:"default_rating" gorm:"default:1000"`
+	KFactor                 int           `json:"k_factor" gorm:"default:32"`
 	PublicResults           bool          `json:"public_results" gorm:"default:true"`
 	PublicMatchLogs         bool          `json:"public_match_logs" gorm:"default:false"`
 	MetadataEnabled         bool          `json:"metadata_enabled" gorm:"default:false"`
@@ -59,6 +60,7 @@ type GameResp struct {
 	MatchmakingMachineName  string   `json:"matchmaking_machine_name"`
 	MatchmakingMachinePorts []int64  `json:"matchmaking_machine_ports"`
 	ELOStrategy             string   `json:"elo_strategy"`
+	KFactor                 int      `json:"k_factor"`
 	MetadataEnabled         bool     `json:"metadata_enabled"`
 	PublicResults           bool     `json:"public_results"`
 	PublicMatchLogs         bool     `json:"public_match_logs"`
@@ -77,6 +79,7 @@ func (u *Game) ToResp() *GameResp {
 		MatchmakingMachineName:  u.MatchmakingMachineName,
 		MatchmakingMachinePorts: []int64(u.MatchmakingMachinePorts),
 		ELOStrategy:             u.ELOStrategy,
+		KFactor:                 u.KFactor,
 		MetadataEnabled:         u.MetadataEnabled,
 		PublicResults:           u.PublicResults,
 		PublicMatchLogs:         u.PublicMatchLogs,
@@ -94,6 +97,7 @@ type CreateGameParams struct {
 	MatchmakingMachineName  string
 	MatchmakingMachinePorts []int64
 	ELOStrategy             string
+	KFactor                 int
 	PublicMatchLogs         *bool
 	MetadataEnabled         bool
 }
@@ -113,6 +117,9 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 	}
 	if !slices.Contains(ELO_STRATEGIES, params.ELOStrategy) {
 		return nil, errors.New("invalid elo strategy: " + params.ELOStrategy + " must be one of " + strings.Join(ELO_STRATEGIES, ", "))
+	}
+	if params.KFactor == 0 {
+		params.KFactor = 32
 	}
 
 	lobbyEnabled := true
@@ -148,6 +155,7 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		MatchmakingMachineName:  params.MatchmakingMachineName,
 		MatchmakingMachinePorts: pq.Int64Array(params.MatchmakingMachinePorts),
 		ELOStrategy:             params.ELOStrategy,
+		KFactor:                 params.KFactor,
 		PublicMatchLogs:         publicMatchLogs,
 		MetadataEnabled:         params.MetadataEnabled,
 	}
@@ -197,6 +205,7 @@ type UpdateGameParams struct {
 	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
 	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
 	ELOStrategy             string  `json:"elo_strategy"`
+	KFactor                 int     `json:"k_factor"`
 	PublicResults           *bool   `json:"public_results"`
 	PublicMatchLogs         *bool   `json:"public_match_logs"`
 	MetadataEnabled         *bool   `json:"metadata_enabled"`
@@ -244,6 +253,9 @@ func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
 	}
 	if params.ELOStrategy != "" {
 		game.ELOStrategy = params.ELOStrategy
+	}
+	if params.KFactor != 0 {
+		game.KFactor = params.KFactor
 	}
 	if params.PublicResults != nil {
 		game.PublicResults = *params.PublicResults

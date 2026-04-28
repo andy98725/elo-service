@@ -6,11 +6,8 @@ import (
 )
 
 func InitRoutes(e *echo.Echo) error {
-	// Create routes for Rating
 	e.GET("/user/rating/:gameId", GetRating, auth.RequireUserAuth)
-	// e.POST("/rating", CreateRating)
-	// e.PUT("/rating/:id", UpdateRating)
-	// e.DELETE("/rating/:id", DeleteRating)
+	e.GET("/game/:gameId/leaderboard", GetLeaderboard)
 
 	return nil
 }

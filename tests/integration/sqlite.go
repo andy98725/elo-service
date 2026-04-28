@@ -42,6 +42,7 @@ func migrateForSQLite(db *gorm.DB) error {
 			matchmaking_machine_ports TEXT DEFAULT '{}',
 			elo_strategy TEXT NOT NULL DEFAULT 'unranked',
 			default_rating INTEGER DEFAULT 1000,
+			k_factor INTEGER DEFAULT 32,
 			public_results INTEGER DEFAULT 1,
 			public_match_logs INTEGER DEFAULT 0,
 			metadata_enabled INTEGER DEFAULT 0,

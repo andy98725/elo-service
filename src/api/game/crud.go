@@ -35,6 +35,7 @@ type CreateGameRequest struct {
 	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
 	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
 	ELOStrategy             string  `json:"elo_strategy"`
+	KFactor                 int     `json:"k_factor"`
 	MetadataEnabled         bool    `json:"metadata_enabled"`
 	PublicResults           *bool   `json:"public_results"`
 	PublicMatchLogs         *bool   `json:"public_match_logs"`
@@ -76,6 +77,7 @@ func CreateGame(ctx echo.Context) error {
 		MatchmakingMachineName:  req.MatchmakingMachineName,
 		MatchmakingMachinePorts: req.MatchmakingMachinePorts,
 		ELOStrategy:             req.ELOStrategy,
+		KFactor:                 req.KFactor,
 		MetadataEnabled:         req.MetadataEnabled,
 		PublicResults:           req.PublicResults,
 		PublicMatchLogs:         req.PublicMatchLogs,
