@@ -456,6 +456,64 @@ Visibility is enforced server-side per the game's `public_results` flag — non-
 
 `/results/{matchID}/logs` is the exception: when `public_match_logs=false` and the caller isn't the game owner (or an admin), it returns `403 Forbidden "Match logs are not public."`, not `404`. A `404` from this route means the match result itself doesn't exist (or isn't visible) or has no stored logs.
 
+### Match artifacts
+
+A game server can attach named artifacts to a match — replay files, preview images, highlight reels, anything else. The platform doesn't interpret the bytes; each artifact has a name (`[a-zA-Z0-9._-]{1,64}`), a content-type (preserved from upload), and a download URL.
+
+**List one match's artifacts:**
+
+```http
+GET /matches/<matchID>/artifacts
+Authorization: Bearer <token>
+```
+
+```json
+{
+  "artifacts": {
+    "preview": {
+      "content_type": "image/png",
+      "size_bytes":   12345,
+      "uploaded_at":  "2026-04-29T10:00:00Z",
+      "url":          "/matches/<matchID>/artifacts/preview"
+    },
+    "replay": { "content_type": "application/octet-stream", "size_bytes": 4096, "uploaded_at": "...", "url": "..." }
+  }
+}
+```
+
+**Download:** follow the `url` (relative to the API base) — the response carries the original Content-Type, so `<img src=…>` works for previews and `fetch().arrayBuffer()` works for replay binaries. Same `404`-on-not-visible rule as the rest of `/results/...` (auth gated by `Game.public_results` and participation).
+
+**List your matches that have artifacts:**
+
+```http
+GET /user/artifacts?game_id=<gameID>&name=replay&name=preview&page=0&pageSize=10
+Authorization: Bearer <token>
+```
+
+Both query params are optional:
+- `game_id` — restrict to a single game
+- `name` — repeatable; OR-filter (matches keep entries where at least one of these names exists). Each returned match still shows its **full** artifact set, not just the filtered names
+
+```json
+{
+  "matches": [
+    {
+      "match_id":  "<uuid>",
+      "game_id":   "<uuid>",
+      "ended_at":  "2026-04-29T10:00:00Z",
+      "artifacts": { "preview": {...}, "replay": {...} }
+    }
+  ],
+  "next_page": 1
+}
+```
+
+`next_page` is `-1` once you've reached the last page (mirrors the existing pagination convention). Artifacts persist for the life of the `MatchResult`; there's no separate retention policy beyond whatever applies to match history.
+
+Conventional names games may upload (recommended, not enforced):
+- `preview` — small image for match-history thumbnails
+- `replay` — game-defined replay file the original client can re-render
+
 ---
 
 ## Lobby WebSocket flow
@@ -729,6 +787,9 @@ WebSocket failures use the in-band `{"status": "error", "error": …}` frame ins
 | `GET`  | `/games/{gameID}/match/me` | user/guest | Active matches you're in (for reconnect) |
 | `GET`  | `/games/{gameID}/matches/live` | user/guest | Spectatable live matches (404 if game `spectate_enabled=false`) |
 | `GET`  | `/matches/{matchID}/stream` | user/guest | Long-poll spectator stream (404 if match `spectate_enabled=false`) |
+| `GET`  | `/matches/{matchID}/artifacts` | user/guest | List artifacts attached to a match (gated by `public_results`) |
+| `GET`  | `/matches/{matchID}/artifacts/{name}` | user/guest | Download one artifact's bytes |
+| `GET`  | `/user/artifacts` | user/guest | Your matches that have artifacts; optional `game_id` and `name=` filters |
 | `GET`  | `/lobby/host` | user/guest | **WebSocket** host lobby |
 | `GET`  | `/lobby/find` | user/guest | List lobbies |
 | `GET`  | `/lobby/join` | user/guest | **WebSocket** join lobby |

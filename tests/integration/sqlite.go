@@ -104,6 +104,7 @@ func migrateForSQLite(db *gorm.DB) error {
 			winner_ids TEXT DEFAULT '{}',
 			result TEXT NOT NULL,
 			logs_key TEXT,
+			artifacts TEXT DEFAULT '{}',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (game_id) REFERENCES games(id)

@@ -118,6 +118,33 @@ There is **no Authorization header** on this endpoint — the per-match `token_i
 
 After a successful POST, the host agent will stop and remove your container shortly. Exit cleanly after reporting.
 
+### 4b. Match artifacts (optional, separate from spectator stream)
+
+You can attach **named artifacts** to a match — replay files, preview images, highlight reels, AI-training snapshots, anything else worth keeping post-match. Artifacts persist on the `MatchResult` so they're discoverable via `/user/artifacts` and `/matches/{matchID}/artifacts`. The matchmaker treats the bytes as opaque.
+
+```http
+POST https://elomm.net/match/artifact?name=<artifact-name>
+Authorization: Bearer <the same token_id you'll use for /result/report>
+Content-Type: <whatever describes the bytes — image/png, application/octet-stream, etc.>
+
+<binary body>
+```
+
+Rules:
+
+- **Auth** is your match's `token_id` in the `Authorization: Bearer …` header — same credential as `/result/report`. Valid only while the match is still underway; calling after `/result/report` returns `403 match is not underway`.
+- **Name** must match `[a-zA-Z0-9._-]{1,64}`. Re-uploading the same name overwrites. Up to **10 distinct names** per match.
+- **Body cap**: 1 MiB. `413 Request Entity Too Large` for anything bigger. Use the spectator stream for high-bandwidth data.
+- **Content-Type** is preserved exactly and returned as the response Content-Type when clients download — set it correctly so `image/png` thumbnails render in browsers.
+
+Conventional names that platform-generic UIs may render specially (recommended, not enforced):
+- `preview` — small image (PNG/JPEG) for match-history thumbnails
+- `replay` — game-defined replay file the client can re-render
+
+You can upload mid-match (post-state-snapshot, after each round) or all-at-once just before `/result/report` — whichever fits your game. The artifact is bound to the match by the auth token, so timing within the match window doesn't matter.
+
+> **Why isn't this part of `/result/report`?** Multipart on the result-report endpoint complicates a previously simple JSON contract. Separate calls also let you upload artifacts incrementally during the match without waiting for game-end.
+
 ---
 
 ## How players connect to you

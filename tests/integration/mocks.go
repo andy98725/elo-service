@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/andy98725/elo-service/src/external/aws"
 	"github.com/andy98725/elo-service/src/external/hetzner"
@@ -296,13 +297,21 @@ func (m *MockMachineService) ActiveContainers() int {
 }
 
 type MockStorageService struct {
-	mu      sync.Mutex
+	mu sync.Mutex
+	// objects backs UploadLogs/GetLogs/PutObject/GetObject and stores
+	// every JSON-shaped sidecar (manifests, indices, etc.) by full key.
 	objects map[string][]byte
+	// artifactBlobs is the per-(match, artifact-name) raw-bytes store
+	// for PutMatchArtifact/GetMatchArtifact. Kept separate so we can
+	// also remember the original Content-Type per artifact (S3 returns
+	// it as object metadata; the in-memory map carries it explicitly).
+	artifactBlobs map[string]mockArtifactBlob
 }
 
 func NewMockStorageService() *MockStorageService {
 	return &MockStorageService{
-		objects: make(map[string][]byte),
+		objects:       make(map[string][]byte),
+		artifactBlobs: make(map[string]mockArtifactBlob),
 	}
 }
 
@@ -384,6 +393,73 @@ func (s *MockStorageService) GetSpectateChunk(ctx context.Context, matchID strin
 		return append([]byte(nil), data...), nil
 	}
 	return nil, aws.ErrNotFound
+}
+
+// mockArtifactBlob is the per-artifact value the mock storage stashes —
+// content-type alongside the bytes, since S3 returns Content-Type from
+// object metadata and tests need to round-trip it.
+type mockArtifactBlob struct {
+	body        []byte
+	contentType string
+}
+
+func (s *MockStorageService) PutMatchArtifact(ctx context.Context, matchID, name, contentType string, body []byte) error {
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.artifactBlobs == nil {
+		s.artifactBlobs = map[string]mockArtifactBlob{}
+	}
+	objKey := fmt.Sprintf("artifacts/%s/%s", matchID, name)
+	s.artifactBlobs[objKey] = mockArtifactBlob{
+		body:        append([]byte(nil), body...),
+		contentType: contentType,
+	}
+
+	indexKey := fmt.Sprintf("artifacts/%s/index.json", matchID)
+	index := map[string]aws.MatchArtifactMeta{}
+	if existing, ok := s.objects[indexKey]; ok {
+		_ = json.Unmarshal(existing, &index)
+	}
+	index[name] = aws.MatchArtifactMeta{
+		ContentType: contentType,
+		SizeBytes:   int64(len(body)),
+		UploadedAt:  time.Now().UTC().Format(time.RFC3339),
+	}
+	indexBytes, err := json.Marshal(index)
+	if err != nil {
+		return err
+	}
+	s.objects[indexKey] = indexBytes
+	return nil
+}
+
+func (s *MockStorageService) GetMatchArtifact(ctx context.Context, matchID, name string) ([]byte, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	objKey := fmt.Sprintf("artifacts/%s/%s", matchID, name)
+	blob, ok := s.artifactBlobs[objKey]
+	if !ok {
+		return nil, "", aws.ErrNotFound
+	}
+	return append([]byte(nil), blob.body...), blob.contentType, nil
+}
+
+func (s *MockStorageService) GetMatchArtifactIndex(ctx context.Context, matchID string) (map[string]aws.MatchArtifactMeta, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	indexKey := fmt.Sprintf("artifacts/%s/index.json", matchID)
+	data, ok := s.objects[indexKey]
+	if !ok {
+		return map[string]aws.MatchArtifactMeta{}, nil
+	}
+	out := map[string]aws.MatchArtifactMeta{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *MockStorageService) MoveSpectateLiveToReplay(ctx context.Context, matchID string) error {

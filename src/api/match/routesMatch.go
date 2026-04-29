@@ -24,5 +24,17 @@ func InitRoutes(e *echo.Echo) error {
 	// Spectator stream proxy: long-poll over the S3-backed chunks for one match.
 	e.GET("/matches/:matchID/stream", GetMatchStream, auth.RequireUserOrGuestAuth)
 
+	// Game-server artifact upload: bytes auth'd by the per-match auth
+	// code in Authorization: Bearer; no JWT middleware needed.
+	e.POST("/match/artifact", UploadMatchArtifact)
+
+	// Per-match artifact retrieval. Auth gated like /results/<id> —
+	// participant/owner/admin always; PublicResults=true unlocks any auth.
+	e.GET("/matches/:matchID/artifacts", ListMatchArtifacts, auth.RequireUserOrGuestAuth)
+	e.GET("/matches/:matchID/artifacts/:name", DownloadMatchArtifact, auth.RequireUserOrGuestAuth)
+
+	// Per-user artifact listing across games. Optional game_id + name= filters.
+	e.GET("/user/artifacts", ListUserArtifacts, auth.RequireUserOrGuestAuth)
+
 	return nil
 }

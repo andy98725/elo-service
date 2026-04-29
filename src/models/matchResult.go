@@ -19,6 +19,14 @@ type MatchResult struct {
 	WinnerIDs pq.StringArray `json:"winner_ids" gorm:"type:text[];default:'{}'"`
 	Result    string         `json:"result" gorm:"not null"`
 	LogsKey   string         `json:"logs_key"`
+	// Artifacts is the list of artifact names the game server uploaded
+	// during this match (via POST /match/artifact). Names only — the
+	// per-artifact metadata (content_type, size, uploaded_at) lives in
+	// S3 at artifacts/<matchID>/index.json. Populated in EndMatch by
+	// reading the S3 index, so a match that uploaded zero artifacts
+	// keeps an empty array. Used by /user/artifacts to filter quickly
+	// in SQL without touching S3.
+	Artifacts pq.StringArray `json:"artifacts" gorm:"type:text[];default:'{}'"`
 	CreatedAt time.Time      `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 	UpdatedAt time.Time      `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 }
@@ -48,19 +56,31 @@ func (m *MatchResult) ToResp() *MatchResultResp {
 	}
 }
 
-func MatchEnded(matchID string, winnerIDs []string, result string, logsKey string, adjustRatings bool) (*MatchResult, error) {
+func MatchEnded(matchID string, winnerIDs []string, result string, logsKey string, artifacts []string, adjustRatings bool) (*MatchResult, error) {
 	match, err := GetMatch(matchID)
 	if err != nil {
 		return nil, err
 	}
 
+	if artifacts == nil {
+		artifacts = []string{}
+	}
+	// Preserve the Match's UUID as the MatchResult's UUID so the same
+	// match_id flows through the whole lifecycle: matchmaker WS, player
+	// reconnect, spectator stream, replay archive, /results, and the
+	// artifact routes all key on one ID. (Match and MatchResult are
+	// different tables; sharing a UUID isn't a PK conflict, and the
+	// Match row is deleted in this same transaction so they never
+	// coexist long.)
 	matchResult := &MatchResult{
+		ID:        matchID,
 		GameID:    match.GameID,
 		Players:   match.Players,
 		GuestIDs:  match.GuestIDs,
 		WinnerIDs: winnerIDs,
 		Result:    result,
 		LogsKey:   logsKey,
+		Artifacts: pq.StringArray(artifacts),
 	}
 	slog.Info("Match ended", "matchID", matchID, "winnerIDs", winnerIDs, "result", result, "logsKey", logsKey, "adjustRatings", adjustRatings)
 
@@ -124,6 +144,103 @@ func GetMatchResultsOfGame(gameID string, page, pageSize int) ([]MatchResult, in
 		nextPage = -1
 	}
 	return matchResults, nextPage, nil
+}
+
+// GetMatchResultsWithArtifactsForPlayer returns the player's match
+// results that have at least one uploaded artifact, optionally filtered
+// to a single game and/or a set of artifact names.
+//
+// filterNames empty → return all results that have any artifact.
+// filterNames non-empty → return results whose artifacts overlap with
+// the supplied set (OR semantics — "has any of these names").
+//
+// Implementation note: the artifact-overlap filter is applied in Go
+// rather than via the Postgres `&&` operator so the same code path works
+// in the SQLite test harness. For users, a portable JOIN through
+// match_result_players selects candidate rows; for guests we fall back
+// to fetching by game_id (or all) and filtering guest_ids in Go, same
+// pattern used by GetActiveMatchesInGameForPlayer for the same reason.
+//
+// Pagination is applied AFTER the in-memory filter so a "page 2" call
+// is consistent with what page 1 returned (caveat: a concurrently
+// uploaded artifact between calls can shift entries; not worth solving
+// for v1).
+func GetMatchResultsWithArtifactsForPlayer(playerID string, gameID *string, filterNames []string, page, pageSize int) ([]MatchResult, int, error) {
+	var candidates []MatchResult
+
+	if util.IsGuestID(playerID) {
+		q := server.S.DB.Preload("Game").Preload("Players").Order("created_at DESC")
+		if gameID != nil {
+			q = q.Where("game_id = ?", *gameID)
+		}
+		if err := q.Find(&candidates).Error; err != nil {
+			return nil, 0, err
+		}
+		// Keep only results this guest participated in.
+		filtered := candidates[:0]
+		for _, mr := range candidates {
+			for _, gid := range mr.GuestIDs {
+				if gid == playerID {
+					filtered = append(filtered, mr)
+					break
+				}
+			}
+		}
+		candidates = filtered
+	} else {
+		q := server.S.DB.
+			Model(&MatchResult{}).
+			Preload("Game").
+			Preload("Players").
+			Joins("JOIN match_result_players mrp ON mrp.match_result_id = match_results.id").
+			Where("mrp.user_id = ?", playerID).
+			Order("match_results.created_at DESC")
+		if gameID != nil {
+			q = q.Where("match_results.game_id = ?", *gameID)
+		}
+		if err := q.Find(&candidates).Error; err != nil {
+			return nil, 0, err
+		}
+	}
+
+	// Filter to results with artifacts; if filterNames is non-empty,
+	// require name overlap.
+	matched := make([]MatchResult, 0, len(candidates))
+	wantSet := make(map[string]struct{}, len(filterNames))
+	for _, n := range filterNames {
+		wantSet[n] = struct{}{}
+	}
+	for _, mr := range candidates {
+		if len(mr.Artifacts) == 0 {
+			continue
+		}
+		if len(wantSet) == 0 {
+			matched = append(matched, mr)
+			continue
+		}
+		for _, name := range mr.Artifacts {
+			if _, ok := wantSet[name]; ok {
+				matched = append(matched, mr)
+				break
+			}
+		}
+	}
+
+	// Paginate the filtered slice. Returning -1 when this page exhausts
+	// the list keeps the contract identical to GetMatchResultsOfPlayer.
+	offset := page * pageSize
+	if offset >= len(matched) {
+		return []MatchResult{}, -1, nil
+	}
+	end := offset + pageSize
+	if end > len(matched) {
+		end = len(matched)
+	}
+	nextPage := page + 1
+	if end == len(matched) {
+		nextPage = -1
+	}
+	return matched[offset:end], nextPage, nil
 }
 
 func GetMatchResultsOfPlayer(playerID string, page, pageSize int) ([]MatchResult, int, error) {

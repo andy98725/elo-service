@@ -97,7 +97,22 @@ func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reas
 			status = "Failed to save match logs"
 		}
 
-		if _, err := models.MatchEnded(match.ID, winnerIDs, reason, logsKey, adjustRatings); err != nil {
+		// Pull the artifact name list from the S3 index the upload
+		// route maintained during the match. Best-effort: a storage
+		// hiccup here logs and stores an empty list; the artifacts
+		// themselves still exist in S3 and can be reattached
+		// out-of-band if needed.
+		var artifactNames []string
+		if index, err := server.S.AWS.GetMatchArtifactIndex(ctx, match.ID); err != nil {
+			slog.Warn("Failed to read artifact index", "error", err, "matchID", match.ID)
+		} else {
+			artifactNames = make([]string, 0, len(index))
+			for name := range index {
+				artifactNames = append(artifactNames, name)
+			}
+		}
+
+		if _, err := models.MatchEnded(match.ID, winnerIDs, reason, logsKey, artifactNames, adjustRatings); err != nil {
 			slog.Error("Failed to record match result", "error", err, "matchID", match.ID)
 			return "", err
 		}
@@ -119,7 +134,7 @@ func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reas
 
 		go tryDeleteIdleHost(&si.MachineHost)
 	} else {
-		if _, err := models.MatchEnded(match.ID, winnerIDs, reason, "", adjustRatings); err != nil {
+		if _, err := models.MatchEnded(match.ID, winnerIDs, reason, "", nil, adjustRatings); err != nil {
 			slog.Error("Failed to record match result", "error", err, "matchID", match.ID)
 			return "", err
 		}
