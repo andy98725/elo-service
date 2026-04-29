@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +39,7 @@ var upgrader = websocket.Upgrader{
 // @Param        tags     query string false "Comma-separated tags advertised to /lobby/find (max 16)"
 // @Param        metadata query string false "Opaque metadata stored on the lobby record"
 // @Param        password query string false "Optional password; joiners must supply the same value to enter"
+// @Param        private  query bool   false "When true, lobby is excluded from /lobby/find. Joiners must be given the lobby ID directly."
 // @Param        token    query string false "JWT token (alternative to Authorization header)"
 // @Router       /lobby/host [get]
 func HostLobby(ctx echo.Context) error {
@@ -82,6 +84,10 @@ func HostLobby(ctx echo.Context) error {
 		passwordHash = string(h)
 	}
 
+	// `private` accepts the standard ParseBool set (1/0, true/false, etc).
+	// Anything unrecognized — including empty — is treated as false.
+	private, _ := strconv.ParseBool(ctx.QueryParam("private"))
+
 	rec := &redis.LobbyRecord{
 		ID:           uuid.New().String(),
 		GameID:       gameID,
@@ -92,6 +98,7 @@ func HostLobby(ctx echo.Context) error {
 		MaxPlayers:   game.LobbySize,
 		CreatedAt:    time.Now().UTC(),
 		PasswordHash: passwordHash,
+		Private:      private,
 	}
 
 	rctx := ctx.Request().Context()
@@ -120,6 +127,7 @@ func HostLobby(ctx echo.Context) error {
 		"metadata":    rec.Metadata,
 		"max_players": rec.MaxPlayers,
 		"players":     1,
+		"private":     rec.Private,
 	})
 
 	runLobbySession(ctx, conn, rec, game, id, name, true, subs)

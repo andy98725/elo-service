@@ -451,6 +451,103 @@ func TestLobbyPasswordProtection(t *testing.T) {
 	}
 }
 
+// TestLobbyPrivate covers: a private lobby is excluded from /lobby/find but
+// still admits a direct /lobby/join with the lobby ID, and is composable
+// with password protection.
+func TestLobbyPrivate(t *testing.T) {
+	h := NewHarness(t)
+
+	RegisterUser(t, h.BaseURL(), "privowner", "privowner@example.com", "pass")
+	ownerToken, _ := LoginUser(t, h.BaseURL(), "privowner@example.com", "pass")
+	game := CreateGame(t, h.BaseURL(), ownerToken, "PrivLobbyGame", 3)
+	gameID := game["id"].(string)
+
+	// Host a private lobby.
+	hostToken, _ := GuestLogin(t, h.BaseURL(), "privhost")
+	hostWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/host?gameID=%s&private=true", h.BaseURL(), gameID),
+		hostToken)
+	defer hostWS.Close()
+	hostHello := readJSONMsg(t, hostWS, 3*time.Second)
+	if hostHello["status"] != "lobby_joined" {
+		t.Fatalf("host: expected lobby_joined, got %+v", hostHello)
+	}
+	if hostHello["private"] != true {
+		t.Errorf("host ack: expected private=true, got %v", hostHello["private"])
+	}
+	privateLobbyID := hostHello["lobby_id"].(string)
+
+	// Also host a public lobby to confirm /find still returns non-private ones.
+	publicHostTok, _ := GuestLogin(t, h.BaseURL(), "privpublichost")
+	publicWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/host?gameID=%s", h.BaseURL(), gameID), publicHostTok)
+	defer publicWS.Close()
+	publicHello := readJSONMsg(t, publicWS, 3*time.Second)
+	publicLobbyID := publicHello["lobby_id"].(string)
+
+	// /lobby/find must omit the private lobby and return only the public one.
+	findToken, _ := GuestLogin(t, h.BaseURL(), "privfinder")
+	findResp := DoReq(t, "GET",
+		fmt.Sprintf("%s/lobby/find?gameID=%s", h.BaseURL(), gameID),
+		nil, findToken, http.StatusOK)
+	lobbies, _ := findResp["lobbies"].([]interface{})
+	if len(lobbies) != 1 {
+		t.Fatalf("find: expected 1 (public) lobby, got %+v", findResp)
+	}
+	if lobbies[0].(map[string]interface{})["id"] != publicLobbyID {
+		t.Errorf("find: expected only public lobby, got %+v", lobbies[0])
+	}
+
+	// Direct /lobby/join with the private lobby ID still works.
+	joinTok, _ := GuestLogin(t, h.BaseURL(), "privjoiner")
+	joinWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/join?lobbyID=%s", h.BaseURL(), privateLobbyID), joinTok)
+	defer joinWS.Close()
+	joinResp := readJSONMsg(t, joinWS, 3*time.Second)
+	if joinResp["status"] != "lobby_joined" {
+		t.Fatalf("private direct join: expected lobby_joined, got %+v", joinResp)
+	}
+
+	// Composable with password: private + password should still gate joins.
+	pwHostTok, _ := GuestLogin(t, h.BaseURL(), "privpwhost")
+	pwHostWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/host?gameID=%s&private=true&password=secret", h.BaseURL(), gameID),
+		pwHostTok)
+	defer pwHostWS.Close()
+	pwHello := readJSONMsg(t, pwHostWS, 3*time.Second)
+	pwLobbyID := pwHello["lobby_id"].(string)
+
+	// Still excluded from find.
+	findResp2 := DoReq(t, "GET",
+		fmt.Sprintf("%s/lobby/find?gameID=%s", h.BaseURL(), gameID),
+		nil, findToken, http.StatusOK)
+	for _, l := range findResp2["lobbies"].([]interface{}) {
+		if l.(map[string]interface{})["id"] == pwLobbyID {
+			t.Errorf("find returned private+password lobby: %+v", l)
+		}
+	}
+
+	// Direct join without password rejected.
+	noPwTok, _ := GuestLogin(t, h.BaseURL(), "privpwnopass")
+	noPwWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/join?lobbyID=%s", h.BaseURL(), pwLobbyID), noPwTok)
+	noPwResp := readJSONMsg(t, noPwWS, 3*time.Second)
+	noPwWS.Close()
+	if noPwResp["status"] != "error" {
+		t.Errorf("private+password join without password: expected error, got %+v", noPwResp)
+	}
+
+	// Direct join with correct password admitted.
+	okTok, _ := GuestLogin(t, h.BaseURL(), "privpwok")
+	okWS := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/join?lobbyID=%s&password=secret", h.BaseURL(), pwLobbyID), okTok)
+	defer okWS.Close()
+	okResp := readJSONMsg(t, okWS, 3*time.Second)
+	if okResp["status"] != "lobby_joined" {
+		t.Fatalf("private+password join with password: expected lobby_joined, got %+v", okResp)
+	}
+}
+
 func toWS(httpURL string) string {
 	if strings.HasPrefix(httpURL, "https://") {
 		return "wss://" + strings.TrimPrefix(httpURL, "https://")

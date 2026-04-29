@@ -1008,7 +1008,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns lobbies for the given game, optionally filtered to those whose Tags contain ALL the comma-separated tags in the query.",
+                "description": "Returns lobbies for the given game, optionally filtered to those whose Tags contain ALL the comma-separated tags in the query. Lobbies hosted with private=true are excluded from this listing and must be joined directly via their lobby ID.",
                 "produces": [
                     "application/json"
                 ],
@@ -1090,6 +1090,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Optional password; joiners must supply the same value to enter",
                         "name": "password",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "When true, lobby is excluded from /lobby/find. Joiners must be given the lobby ID directly.",
+                        "name": "private",
                         "in": "query"
                     },
                     {
