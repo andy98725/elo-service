@@ -15,5 +15,8 @@ func InitRoutes(e *echo.Echo) error {
 	e.GET("/match/game/:gameID", GetMatchesOfGame, auth.RequireUserAuth)
 	e.GET("/matches", GetMatches, auth.RequireAdmin)
 
+	// Reconnect: rediscover active matches in a game after a page reload.
+	e.GET("/games/:gameID/match/me", GetMyActiveMatches, auth.RequireUserOrGuestAuth)
+
 	return nil
 }

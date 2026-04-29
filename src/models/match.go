@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
+	"github.com/andy98725/elo-service/src/util"
 	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
@@ -136,6 +137,43 @@ func GetMatchesUnderway(page, pageSize int) ([]Match, int, error) {
 		nextPage = -1
 	}
 	return matches, nextPage, result.Error
+}
+
+// GetActiveMatchesInGameForPlayer returns every status='started' match in
+// the given game that the player participates in. Used by the reconnect
+// endpoint so a client can rediscover the server it's supposed to be
+// connected to after a page reload.
+//
+// The same (game, player) can legitimately have multiple active matches —
+// the matchmaker doesn't enforce one-at-a-time, and games may want to use
+// it that way. Caller decides which to surface.
+//
+// Guests are filtered in Go rather than via "? = ANY(guest_ids)" because
+// the SQLite test harness stores guest_ids as TEXT. Bounded query: status
+// + game_id pre-filter keeps the row count small.
+func GetActiveMatchesInGameForPlayer(gameID, playerID string) ([]Match, error) {
+	var matches []Match
+	q := matchQuery().Where("game_id = ? AND status = ?", gameID, "started")
+
+	if util.IsGuestID(playerID) {
+		if err := q.Find(&matches).Error; err != nil {
+			return nil, err
+		}
+		out := matches[:0]
+		for _, m := range matches {
+			for _, gid := range m.GuestIDs {
+				if gid == playerID {
+					out = append(out, m)
+					break
+				}
+			}
+		}
+		return out, nil
+	}
+
+	err := q.Where("id IN (SELECT match_id FROM match_players WHERE user_id = ?)", playerID).
+		Find(&matches).Error
+	return matches, err
 }
 
 func IsMatchUnderway(matchID string) (bool, error) {

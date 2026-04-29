@@ -294,6 +294,36 @@ Response `200`: `{ "players_in_queue": 4 }`. Useful for showing "Searching… (4
 
 `metadata` is optional and follows the same rules as on `/match/join` — only honored when `metadata_enabled=true`, max 4096 bytes, and segments the count to the matching sub-queue. For metadata-segmented games, calling `/match/size` without `metadata` returns the *empty* sub-queue's size, which is rarely what you want.
 
+### Reconnecting after a page reload
+
+The matchmaking WebSocket emits `match_found` exactly once. If the connection drops or the user reloads, the original payload is gone — the client needs another way to find the running game server. Use:
+
+```http
+GET /games/<gameID>/match/me
+Authorization: Bearer <jwt>
+```
+
+Response `200`:
+
+```json
+{
+  "matches": [
+    {
+      "match_id":     "<uuid>",
+      "server_host":  "host-...gs.elomm.net",
+      "server_ports": [7001],
+      "started_at":   "2026-04-29T08:24:04Z"
+    }
+  ]
+}
+```
+
+The shape inside `matches[]` mirrors the `match_found` payload — feed it into the same connection code. An empty `matches` array means no active match; treat as "not in a game."
+
+A player can be in multiple started matches in the same game at once (the matchmaker doesn't enforce one-at-a-time), so the response is a list. Most games will see at most one entry; if you need to pick, sort by `started_at` and use the most recent.
+
+**Guest caveat.** Guest identity lives entirely in the JWT. If the page reloads without preserving the token (localStorage, cookie, or wherever your client stashes it), `/guest/login` mints a new ID and this endpoint returns empty for the new identity. Native clients with stable storage are unaffected; browser clients should persist the token before they need to reconnect.
+
 ---
 
 ## Match history & results
@@ -579,6 +609,7 @@ WebSocket failures use the in-band `{"status": "error", "error": …}` frame ins
 | `GET`  | `/match/join` | user/guest | **WebSocket** matchmaking |
 | `GET`  | `/match/{matchID}` | user | Get one match (participant or owner) |
 | `GET`  | `/match/game/{gameID}` | user | Paginated matches for a game |
+| `GET`  | `/games/{gameID}/match/me` | user/guest | Active matches you're in (for reconnect) |
 | `GET`  | `/lobby/host` | user/guest | **WebSocket** host lobby |
 | `GET`  | `/lobby/find` | user/guest | List lobbies |
 | `GET`  | `/lobby/join` | user/guest | **WebSocket** join lobby |
