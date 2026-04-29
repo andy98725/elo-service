@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/andy98725/elo-service/src/external/aws"
 	"github.com/andy98725/elo-service/src/external/hetzner"
 )
 
@@ -60,6 +61,22 @@ type StorageService interface {
 	// manifest → delete live chunks → delete live manifest. Spectators
 	// only ever see one consistent prefix per request.
 	MoveSpectateLiveToReplay(ctx context.Context, matchID string) error
+
+	// PutMatchArtifact stores one named artifact at
+	// artifacts/<matchID>/<name> and updates the per-match index.json
+	// with the artifact's metadata. The implementation is responsible
+	// for the read-modify-write of the index — concurrent uploads to
+	// the same match can race, but game servers typically don't.
+	PutMatchArtifact(ctx context.Context, matchID, name, contentType string, body []byte) error
+	// GetMatchArtifact returns the bytes and stored content-type for
+	// one artifact. ErrNotFound when the artifact doesn't exist.
+	GetMatchArtifact(ctx context.Context, matchID, name string) (body []byte, contentType string, err error)
+	// GetMatchArtifactIndex returns the parsed metadata for every
+	// artifact in this match. Empty map (no error) when the match has
+	// no artifacts. The metadata type lives in the aws package — server
+	// already imports aws to construct AWSClient, so referencing it here
+	// avoids defining the same shape twice.
+	GetMatchArtifactIndex(ctx context.Context, matchID string) (map[string]aws.MatchArtifactMeta, error)
 }
 
 // DNSService is the per-host DNS-record CRUD surface. Production is satisfied

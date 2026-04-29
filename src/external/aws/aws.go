@@ -213,6 +213,114 @@ func (c *AWSClient) MoveSpectateLiveToReplay(ctx context.Context, matchID string
 	return nil
 }
 
+// MatchArtifactMeta is the per-artifact metadata serialized into
+// artifacts/<matchID>/index.json. Defined here (the leaf package) so
+// both server.StorageService and any consumer can reference it without
+// a circular import — server already imports aws to construct the
+// AWSClient.
+type MatchArtifactMeta struct {
+	ContentType string `json:"content_type"`
+	SizeBytes   int64  `json:"size_bytes"`
+	UploadedAt  string `json:"uploaded_at"`
+}
+
+// PutMatchArtifact stores raw bytes at artifacts/<matchID>/<name> with
+// the supplied Content-Type, then updates artifacts/<matchID>/index.json
+// to record the new artifact's metadata. The R-M-W on index.json is
+// non-atomic; concurrent uploads to the same match can lose one
+// another's metadata entry. Game servers typically upload sequentially
+// at end-of-match, so this is acceptable for v1.
+func (c *AWSClient) PutMatchArtifact(ctx context.Context, matchID, name, contentType string, body []byte) error {
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	objectKey := fmt.Sprintf("artifacts/%s/%s", matchID, name)
+	if _, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(c.bucketName),
+		Key:           aws.String(objectKey),
+		Body:          bytes.NewReader(body),
+		ContentLength: aws.Int64(int64(len(body))),
+		ContentType:   aws.String(contentType),
+	}); err != nil {
+		return fmt.Errorf("put artifact: %w", err)
+	}
+
+	indexKey := fmt.Sprintf("artifacts/%s/index.json", matchID)
+	index := map[string]MatchArtifactMeta{}
+	if existing, err := c.GetObject(ctx, indexKey); err == nil {
+		_ = json.Unmarshal(existing, &index)
+	} else if !errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("read artifact index: %w", err)
+	}
+	index[name] = MatchArtifactMeta{
+		ContentType: contentType,
+		SizeBytes:   int64(len(body)),
+		UploadedAt:  time.Now().UTC().Format(time.RFC3339),
+	}
+	indexBytes, err := json.Marshal(index)
+	if err != nil {
+		return fmt.Errorf("marshal artifact index: %w", err)
+	}
+	if _, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(c.bucketName),
+		Key:           aws.String(indexKey),
+		Body:          bytes.NewReader(indexBytes),
+		ContentLength: aws.Int64(int64(len(indexBytes))),
+		ContentType:   aws.String("application/json"),
+	}); err != nil {
+		return fmt.Errorf("write artifact index: %w", err)
+	}
+	return nil
+}
+
+// GetMatchArtifact returns the raw bytes and Content-Type recorded by
+// PutMatchArtifact. The Content-Type comes from S3's object metadata,
+// not the index — both should agree but the per-object header is the
+// authoritative one for HTTP response headers.
+func (c *AWSClient) GetMatchArtifact(ctx context.Context, matchID, name string) ([]byte, string, error) {
+	resp, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucketName),
+		Key:    aws.String(fmt.Sprintf("artifacts/%s/%s", matchID, name)),
+	})
+	if err != nil {
+		var nsk *s3types.NoSuchKey
+		if errors.As(err, &nsk) {
+			return nil, "", ErrNotFound
+		}
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	contentType := ""
+	if resp.ContentType != nil {
+		contentType = *resp.ContentType
+	}
+	return body, contentType, nil
+}
+
+// GetMatchArtifactIndex returns the parsed metadata for every artifact
+// in this match. Returns an empty map (not nil, not error) when the
+// match has no artifacts — callers can range over the result without
+// nil-checking.
+func (c *AWSClient) GetMatchArtifactIndex(ctx context.Context, matchID string) (map[string]MatchArtifactMeta, error) {
+	indexKey := fmt.Sprintf("artifacts/%s/index.json", matchID)
+	data, err := c.GetObject(ctx, indexKey)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return map[string]MatchArtifactMeta{}, nil
+		}
+		return nil, err
+	}
+	out := map[string]MatchArtifactMeta{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("parse artifact index: %w", err)
+	}
+	return out, nil
+}
+
 func (c *AWSClient) GetObject(ctx context.Context, key string) ([]byte, error) {
 	resp, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucketName),
