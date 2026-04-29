@@ -84,6 +84,28 @@ Single in-process goroutine in [`src/worker/worker.go`](src/worker/worker.go). T
 
 [`src/models/migrations.go`](src/models/migrations.go) uses `gormigrate` wrapped in `pg_advisory_lock(42)` so multiple Fly machines starting concurrently don't race on schema. After named migrations, an unconditional `AutoMigrate` runs over every model — so adding a column to a struct ships without a new migration step. The named migrations exist for destructive schema changes (e.g. dropping the old per-match `machine_*` columns when the host-pool model landed).
 
+## Rolling out a new host-agent image
+
+Cloud-init pulls `andy98725/game-server-host-agent:latest` **at host provisioning time** ([`src/external/hetzner/machines.go`](src/external/hetzner/machines.go)) and never refreshes. So existing hosts stay frozen at the agent version they booted with; only newly-provisioned hosts pick up updates. Rolling a change to the live fleet is a deliberate sequence:
+
+1. **Build + push the new image:** `make agent-push` (builds [`game-server-host-agent/`](game-server-host-agent/), tags as `andy98725/game-server-host-agent:latest`, pushes to Docker Hub).
+2. **Find an empty host** — a `MachineHost` with `status='ready'` and no active `ServerInstance` rows. SQL:
+   ```sql
+   SELECT mh.id, mh.provider_id, mh.public_ip, COUNT(si.id) FILTER (WHERE si.status != 'deleted') AS active
+   FROM machine_hosts mh LEFT JOIN server_instances si ON si.machine_host_id = mh.id
+   WHERE mh.status = 'ready' GROUP BY mh.id;
+   ```
+   Only roll hosts where `active = 0`. Rolling a host with running matches drops live players.
+3. **Delete the Hetzner VM directly** (provider console or `hcloud server delete <providerID>`). The matchmaker sees nothing yet — the row is still `status='ready'`.
+4. **Wake the GC trigger** so the matchmaker reconciles the dead VM and the warm pool refills with a freshly-provisioned host (which pulls the new image). With idle traffic, GC doesn't fire on its own ([`src/worker/matchmaking/pairPlayers.go`](src/worker/matchmaking/pairPlayers.go) only publishes the trigger after pairings); send a manual pulse:
+   ```
+   PUBLISH trigger_garbage_collection 1
+   ```
+   on the production Redis (Upstash). Or trigger any real match — same effect.
+5. **Watch for the new row**: a fresh `machine_hosts` entry with a different `provider_id` should appear within ~60–90s, status `provisioning` then `ready`. Verify the new agent by hitting an endpoint that exists only on the new build (e.g. a new route added in the change).
+
+The `MaintainWarmPool` pass only grows the pool; there's no automatic shrink. The destroy-and-let-warm-pool-refill dance is the only way to roll the agent on existing hosts. Repeat per host if rolling more than one.
+
 ## Auth model
 
 JWT-based, two token types validated in [`src/api/auth/middleware.go`](src/api/auth/middleware.go):
