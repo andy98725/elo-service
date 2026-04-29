@@ -33,8 +33,14 @@ type Game struct {
 	CreatedAt   time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 
 	// TODO separate into leaderboard if needed
-	GuestsAllowed          bool   `json:"guests_allowed" gorm:"default:true"`
-	LobbyEnabled           bool   `json:"lobby_enabled" gorm:"default:true"`
+	// `default:true` tags are deliberately omitted from these three
+	// bools (GuestsAllowed, LobbyEnabled, PublicResults). GORM's INSERT
+	// path treats `default:` tagged fields as "use DB default if Go
+	// zero value" — which silently flips an explicit `false` from the
+	// caller to `true`. Defaults are enforced in CreateGame instead, so
+	// the model carries the value the caller asked for.
+	GuestsAllowed          bool   `json:"guests_allowed"`
+	LobbyEnabled           bool   `json:"lobby_enabled"`
 	LobbySize              int    `json:"lobby_size" gorm:"default:2"`
 	MatchmakingStrategy    string `json:"matchmaking_strategy" gorm:"not null;default:'random'"`
 	MatchmakingMachineName string `json:"matchmaking_machine_name" gorm:"not null"`
@@ -43,7 +49,7 @@ type Game struct {
 	ELOStrategy             string        `json:"elo_strategy" gorm:"not null;default:'unranked'"`
 	DefaultRating           int           `json:"default_rating" gorm:"default:1000"`
 	KFactor                 int           `json:"k_factor" gorm:"default:32"`
-	PublicResults           bool          `json:"public_results" gorm:"default:true"`
+	PublicResults           bool          `json:"public_results"`
 	PublicMatchLogs         bool          `json:"public_match_logs" gorm:"default:false"`
 	MetadataEnabled         bool          `json:"metadata_enabled" gorm:"default:false"`
 	// SpectateEnabled lets non-participants discover live matches in this
