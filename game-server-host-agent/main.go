@@ -72,6 +72,7 @@ func main() {
 	mux.HandleFunc("DELETE /containers/{id}", handleStopContainer)
 	mux.HandleFunc("GET /containers/{id}/health", handleContainerHealth)
 	mux.HandleFunc("GET /containers/{id}/logs", handleContainerLogs)
+	mux.HandleFunc("GET /containers/stats", handleContainerStats)
 
 	log.Printf("Agent listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, authMiddleware(mux)); err != nil {
@@ -144,6 +145,11 @@ func handleStartContainer(w http.ResponseWriter, r *http.Request) {
 	cmd := []string{"-token", req.Token}
 	cmd = append(cmd, req.PlayerIDs...)
 
+	// TODO: add Resources (Memory, NanoCPUs) to HostConfig once /containers/stats
+	// gives us per-game footprint numbers from a real load test. Today every
+	// container on a host shares the VM's CPU/RAM unbounded — a noisy game can
+	// starve its neighbors. Right-size from measurements before raising slot
+	// counts.
 	created, err := dockerClient.ContainerCreate(ctx,
 		&container.Config{Image: req.Image, Cmd: cmd, ExposedPorts: exposedPorts},
 		&container.HostConfig{PortBindings: portBindings},
@@ -191,6 +197,92 @@ func handleContainerHealth(w http.ResponseWriter, r *http.Request) {
 	} else {
 		http.Error(w, "container not running", http.StatusServiceUnavailable)
 	}
+}
+
+type containerStat struct {
+	ContainerID      string  `json:"container_id"`
+	Name             string  `json:"name,omitempty"`
+	CPUPercent       float64 `json:"cpu_percent"`
+	MemoryUsedBytes  uint64  `json:"memory_used_bytes"`
+	MemoryLimitBytes uint64  `json:"memory_limit_bytes"`
+	NetworkRxBytes   uint64  `json:"network_rx_bytes"`
+	NetworkTxBytes   uint64  `json:"network_tx_bytes"`
+}
+
+func handleContainerStats(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	containers, err := dockerClient.ContainerList(ctx, container.ListOptions{})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to list containers: %v", err), http.StatusInternalServerError)
+		return
+	}
+	out := make([]containerStat, 0, len(containers))
+	for _, c := range containers {
+		s, err := readContainerStats(ctx, c.ID)
+		if err != nil {
+			log.Printf("stats: skipping container %s: %v", c.ID, err)
+			continue
+		}
+		if len(c.Names) > 0 {
+			s.Name = strings.TrimPrefix(c.Names[0], "/")
+		}
+		out = append(out, *s)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+
+func readContainerStats(ctx context.Context, id string) (*containerStat, error) {
+	// stream=false makes the daemon read two samples internally and populate
+	// precpu_stats, which we need for the CPU% delta.
+	resp, err := dockerClient.ContainerStats(ctx, id, false)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var v container.StatsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		return nil, err
+	}
+
+	cpuPercent := 0.0
+	cpuDelta := float64(v.CPUStats.CPUUsage.TotalUsage) - float64(v.PreCPUStats.CPUUsage.TotalUsage)
+	systemDelta := float64(v.CPUStats.SystemUsage) - float64(v.PreCPUStats.SystemUsage)
+	if systemDelta > 0 && cpuDelta > 0 {
+		numCPUs := float64(v.CPUStats.OnlineCPUs)
+		if numCPUs == 0 {
+			numCPUs = float64(len(v.CPUStats.CPUUsage.PercpuUsage))
+		}
+		if numCPUs == 0 {
+			numCPUs = 1
+		}
+		cpuPercent = (cpuDelta / systemDelta) * numCPUs * 100.0
+	}
+
+	// Subtract page cache so the number reflects actual working set, matching
+	// what `docker stats` displays. cgroup v2 uses inactive_file; v1 uses cache.
+	memUsed := v.MemoryStats.Usage
+	if c, ok := v.MemoryStats.Stats["total_inactive_file"]; ok && c < memUsed {
+		memUsed -= c
+	} else if c, ok := v.MemoryStats.Stats["cache"]; ok && c < memUsed {
+		memUsed -= c
+	}
+
+	var rx, tx uint64
+	for _, n := range v.Networks {
+		rx += n.RxBytes
+		tx += n.TxBytes
+	}
+
+	return &containerStat{
+		ContainerID:      id,
+		CPUPercent:       cpuPercent,
+		MemoryUsedBytes:  memUsed,
+		MemoryLimitBytes: v.MemoryStats.Limit,
+		NetworkRxBytes:   rx,
+		NetworkTxBytes:   tx,
+	}, nil
 }
 
 func handleContainerLogs(w http.ResponseWriter, r *http.Request) {
