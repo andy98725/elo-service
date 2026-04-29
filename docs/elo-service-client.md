@@ -96,6 +96,48 @@ Authorization: Bearer <token>
 
 Response `200`: same `UserResp` shape as registration.
 
+### Update your profile
+
+```http
+PUT /user
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "username": "new-handle", "email": "new@example.com" }
+```
+
+Both fields are optional — send only what's changing. Response is the updated `UserResp`.
+
+- `400` — empty string for either field.
+- `409` — username or email already taken (the unique-index slot is held even by soft-deleted accounts; see *Delete your account* below).
+
+> **Email is trusted from the client today.** There's no verification round-trip, so a malicious client could change `email` to one it doesn't control. Don't build features that rely on email identity (password reset, ownership transfer, billing) until verification lands.
+
+### Change your password
+
+```http
+PUT /user/password
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "current_password": "…", "new_password": "…" }
+```
+
+Response `200`: `{ "status": "ok" }`. The current password must match — `401` otherwise. The new password takes effect immediately; re-authenticate with `/user/login` to get a fresh token if you want.
+
+This endpoint always operates on the authenticated user, even when an admin is impersonating someone else. Credential rotation through impersonation isn't allowed by design.
+
+### Delete your account
+
+```http
+DELETE /user
+Authorization: Bearer <token>
+```
+
+Response `200`: `{ "status": "ok" }`. This is a **soft delete** — the row stays in the database so match history and ratings remain intact, but the account can no longer log in and is hidden from listings. **Username and email are not released** — re-registering with either returns `409`. There is currently no self-service path to undelete; an admin has to do it via direct DB access.
+
+Existing JWTs issued to the account before deletion will fail on the next request that goes through user middleware (the lookup filters out deleted rows). Clients should drop the token and return the user to the login screen.
+
 ---
 
 ## Game discovery
@@ -603,6 +645,9 @@ WebSocket failures use the in-band `{"status": "error", "error": …}` frame ins
 | `POST` | `/user` | none | Register |
 | `POST` | `/user/login` | none | Login |
 | `GET`  | `/user` | user | Current user info |
+| `PUT`  | `/user` | user | Update own username / email (admin: `?id=<uuid>` + `can_create_game`) |
+| `PUT`  | `/user/password` | user | Rotate own password (verifies current) |
+| `DELETE` | `/user` | user | Soft-delete own account (admin: `?id=<uuid>`) |
 | `GET`  | `/game/{id}` | none | Fetch a game by UUID (public) |
 | `GET`  | `/user/game` | user | List your games |
 | `GET`  | `/match/size` | user/guest | Queue size for a game |
