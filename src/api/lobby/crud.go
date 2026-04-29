@@ -9,7 +9,7 @@ import (
 
 // FindLobby godoc
 // @Summary      List open lobbies for a game
-// @Description  Returns lobbies for the given game, optionally filtered to those whose Tags contain ALL the comma-separated tags in the query.
+// @Description  Returns lobbies for the given game, optionally filtered to those whose Tags contain ALL the comma-separated tags in the query. Lobbies hosted with private=true are excluded from this listing and must be joined directly via their lobby ID.
 // @Tags         Lobby
 // @Produce      json
 // @Security     BearerAuth
@@ -33,6 +33,9 @@ func FindLobby(ctx echo.Context) error {
 
 	resp := make([]*LobbyResp, 0, len(records))
 	for _, rec := range records {
+		if rec.Private {
+			continue
+		}
 		if !tagsContainAll(rec.Tags, wantedTags) {
 			continue
 		}

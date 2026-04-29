@@ -47,6 +47,10 @@ type LobbyRecord struct {
 	MaxPlayers   int       `json:"max_players"`
 	CreatedAt    time.Time `json:"created_at"`
 	PasswordHash string    `json:"-"`
+	// Private lobbies are excluded from /lobby/find. They can still be
+	// joined directly with the lobby ID (and password, if set) — "unlisted"
+	// is a more accurate description than "private".
+	Private bool `json:"private"`
 }
 
 func lobbyKey(lobbyID string) string         { return "lobby_" + lobbyID }
@@ -78,6 +82,7 @@ func (r *Redis) CreateLobby(ctx context.Context, lobby *LobbyRecord) error {
 		"max_players", strconv.Itoa(lobby.MaxPlayers),
 		"created_at", lobby.CreatedAt.Format(time.RFC3339Nano),
 		"password_hash", lobby.PasswordHash,
+		"private", strconv.FormatBool(lobby.Private),
 	)
 	pipe.SAdd(ctx, lobbyIndexKey(lobby.GameID), lobby.ID)
 	_, err = pipe.Exec(ctx)
@@ -98,6 +103,7 @@ func (r *Redis) GetLobby(ctx context.Context, lobbyID string) (*LobbyRecord, err
 	if raw := fields["tags"]; raw != "" {
 		_ = json.Unmarshal([]byte(raw), &tags)
 	}
+	private, _ := strconv.ParseBool(fields["private"])
 	return &LobbyRecord{
 		ID:           fields["id"],
 		GameID:       fields["game_id"],
@@ -108,6 +114,7 @@ func (r *Redis) GetLobby(ctx context.Context, lobbyID string) (*LobbyRecord, err
 		MaxPlayers:   maxPlayers,
 		CreatedAt:    createdAt,
 		PasswordHash: fields["password_hash"],
+		Private:      private,
 	}, nil
 }
 
