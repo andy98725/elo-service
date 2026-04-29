@@ -124,7 +124,7 @@ Run from the repo root unless noted.
 
 [`src/server/config.go`](src/server/config.go) is the source of truth. **Required** at startup or the process panics: `FLY_API_HOSTNAME`, `FLY_API_KEY`, `FLY_APP_NAME`, `REDIS_URL`, `DATABASE_URL`, `HCLOUD_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_BUCKET_NAME`.
 
-Loaded from `.env` then `config.env` via `godotenv`. `.env` is gitignored; `staging.env` and `local.env` are checked in as references.
+Loaded from `.env` then `config.env` via `godotenv`. All `*.env` files (including `staging.env` and `local.env`) are gitignored.
 
 Notable tunables:
 
@@ -151,3 +151,5 @@ Notable tunables:
 - `500` is reserved for actual internal errors.
 
 **Pubsub Subscribe is async — confirm before relying on it.** `Client.Subscribe()` (both real Redis and miniredis) returns immediately; the SUBSCRIBE doesn't necessarily reach the server before the next line of code runs. Any publish in that window is silently dropped. The `Watch*` helpers in [`src/external/redis/`](src/external/redis/) wrap their `Subscribe` calls in a `PubSubNumSub` poll that blocks until the subscriber count includes us — use these (not raw `Client.Subscribe`) so callers don't have to think about it. Equally important: subscribe BEFORE writing client-visible state (e.g. `lobby_joined`, `queue_joined`) — otherwise the client can act on the welcome message and trigger a publish that races our own SUBSCRIBE. See [`openLobbySubs`](src/api/lobby/lobby.go) for the lobby flow's solution.
+
+**Keep `docs/` in sync with feature changes.** [`docs/elo-service-client.md`](docs/elo-service-client.md) and [`docs/elo-service-server.md`](docs/elo-service-server.md) are the canonical client- and game-server-facing API references — not auto-generated, hand-maintained. Any change that adds, removes, or alters a route, payload field, status semantic, env var, or container contract must update the relevant doc *in the same PR*. The endpoint cheatsheet at the bottom of each is the part most often forgotten — check it. Stale docs mislead integrators and erode trust faster than a missing feature.

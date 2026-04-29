@@ -1,4 +1,4 @@
-.PHONY: fresh up down build logs clean swagger example-run example-push
+.PHONY: fresh up down build logs clean swagger example-run example-push sidecar-push agent-push
 
 fresh: down build up logs
 
@@ -46,3 +46,8 @@ sidecar-push:
 	cd game-server-sidecar && docker build -t game-server-sidecar .
 	docker tag game-server-sidecar andy98725/game-server-sidecar:latest
 	docker push andy98725/game-server-sidecar:latest
+
+agent-push:
+	cd game-server-host-agent && docker build -t game-server-host-agent .
+	docker tag game-server-host-agent andy98725/game-server-host-agent:latest
+	docker push andy98725/game-server-host-agent:latest

@@ -214,6 +214,106 @@ func TestMatchPairingTwoGuests(t *testing.T) {
 	}
 }
 
+// TestActiveMatchEndpointGuests pairs two guests, then verifies each can
+// rediscover their match via GET /games/:gameID/match/me. Covers the
+// guest-id branch of GetActiveMatchesInGameForPlayer (Go-side filter).
+func TestActiveMatchEndpointGuests(t *testing.T) {
+	h := NewHarness(t)
+
+	RegisterUser(t, h.BaseURL(), "rcowner", "rcowner@example.com", "pass")
+	ownerToken, _ := LoginUser(t, h.BaseURL(), "rcowner@example.com", "pass")
+	game := CreateGame(t, h.BaseURL(), ownerToken, "ReconnectGame", 2)
+	gameID := game["id"].(string)
+
+	g1Token, _ := GuestLogin(t, h.BaseURL(), "rc1")
+	g2Token, _ := GuestLogin(t, h.BaseURL(), "rc2")
+
+	// Before any match, the endpoint returns an empty list (not 404).
+	resp := DoReq(t, "GET", fmt.Sprintf("%s/games/%s/match/me", h.BaseURL(), gameID), nil, g1Token, http.StatusOK)
+	if matches, _ := resp["matches"].([]interface{}); len(matches) != 0 {
+		t.Fatalf("expected empty matches before pairing, got %+v", matches)
+	}
+
+	// Pair both guests via the matchmaking WS.
+	ws1 := WebsocketConnect(t, fmt.Sprintf("%s/match/join?gameID=%s", h.BaseURL(), gameID), g1Token)
+	defer ws1.Close()
+	ws2 := WebsocketConnect(t, fmt.Sprintf("%s/match/join?gameID=%s", h.BaseURL(), gameID), g2Token)
+	defer ws2.Close()
+
+	for _, ws := range []*websocket.Conn{ws1, ws2} {
+		_, _, _ = ws.ReadMessage() // queue_joined
+	}
+
+	TriggerMatchmaking(t)
+
+	var foundHost string
+	var foundMatchID string
+	results := make(chan struct{}, 2)
+	for _, ws := range []*websocket.Conn{ws1, ws2} {
+		ws := ws
+		go func() {
+			ws.SetReadDeadline(time.Now().Add(10 * time.Second))
+			for {
+				_, msg, err := ws.ReadMessage()
+				if err != nil {
+					results <- struct{}{}
+					return
+				}
+				var r map[string]interface{}
+				json.Unmarshal(msg, &r)
+				if r["status"] == "match_found" {
+					foundHost, _ = r["server_host"].(string)
+					foundMatchID, _ = r["match_id"].(string)
+					results <- struct{}{}
+					return
+				}
+			}
+		}()
+	}
+	<-results
+	<-results
+
+	if foundMatchID == "" {
+		t.Fatal("never observed match_found")
+	}
+
+	// Now each guest should see one active match, with the same shape
+	// the WS handed them.
+	for i, token := range []string{g1Token, g2Token} {
+		resp := DoReq(t, "GET", fmt.Sprintf("%s/games/%s/match/me", h.BaseURL(), gameID), nil, token, http.StatusOK)
+		matches, _ := resp["matches"].([]interface{})
+		if len(matches) != 1 {
+			t.Fatalf("guest %d: expected 1 active match, got %d (%+v)", i+1, len(matches), matches)
+		}
+		m := matches[0].(map[string]interface{})
+		if m["match_id"] != foundMatchID {
+			t.Errorf("guest %d: match_id mismatch: got %v, want %v", i+1, m["match_id"], foundMatchID)
+		}
+		if m["server_host"] != foundHost {
+			t.Errorf("guest %d: server_host mismatch: got %v, want %v", i+1, m["server_host"], foundHost)
+		}
+		if ports, _ := m["server_ports"].([]interface{}); len(ports) == 0 {
+			t.Errorf("guest %d: expected non-empty server_ports", i+1)
+		}
+		if m["started_at"] == nil || m["started_at"] == "" {
+			t.Errorf("guest %d: missing started_at", i+1)
+		}
+	}
+
+	// A guest who isn't in this match (or any match) sees an empty list.
+	g3Token, _ := GuestLogin(t, h.BaseURL(), "rc3-bystander")
+	resp = DoReq(t, "GET", fmt.Sprintf("%s/games/%s/match/me", h.BaseURL(), gameID), nil, g3Token, http.StatusOK)
+	if matches, _ := resp["matches"].([]interface{}); len(matches) != 0 {
+		t.Errorf("bystander expected empty matches, got %+v", matches)
+	}
+}
+
+// TestActiveMatchEndpointAuth verifies the route requires user-or-guest auth.
+func TestActiveMatchEndpointAuth(t *testing.T) {
+	h := NewHarness(t)
+	DoReq(t, "GET", h.BaseURL()+"/games/any/match/me", nil, "", http.StatusUnauthorized)
+}
+
 func TestThreePlayerLobby(t *testing.T) {
 	h := NewHarness(t)
 
