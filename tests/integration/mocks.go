@@ -10,10 +10,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 
+	"github.com/andy98725/elo-service/src/external/aws"
 	"github.com/andy98725/elo-service/src/external/hetzner"
 )
 
@@ -22,11 +25,49 @@ import (
 // HTTP server that simulates the host agent's container endpoints
 // (start/stop/health/logs). That's enough for tests because the matchmaker
 // only ever calls the agent over HTTP; it doesn't introspect VMs directly.
+// MockSpectateBuffer is the per-spectate-id append-only byte buffer the
+// mock agent serves. Tests push bytes into a buffer to simulate a game
+// server writing to /shared/spectate.stream; the matchmaker's uploader
+// then pulls from `/spectate/<id>` and the uploader chunks land in the
+// MockStorageService. Lets tests assert on the upload flow end-to-end
+// without a real game container.
+type MockSpectateBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (b *MockSpectateBuffer) Append(p []byte) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, p...)
+}
+
+func (b *MockSpectateBuffer) bytesFrom(offset int64, max int) []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if offset >= int64(len(b.buf)) {
+		return nil
+	}
+	end := int64(len(b.buf))
+	if max > 0 && offset+int64(max) < end {
+		end = offset + int64(max)
+	}
+	out := make([]byte, end-offset)
+	copy(out, b.buf[offset:end])
+	return out
+}
+
 type MockMachineService struct {
 	mu        sync.Mutex
 	hosts     map[string]*hetzner.HostConnectionInfo // keyed by ProviderID
 	containers map[string]bool                       // containerID -> alive
 	nextHost  atomic.Int64
+
+	// spectateBuffers is keyed by the spectate_id the matchmaker generates
+	// when starting a container. Tests grab a buffer via SpectateBuffer
+	// and Append bytes to simulate a game-server stream; the mock agent's
+	// /spectate/<id> route reads from it.
+	spectateBuffers map[string]*MockSpectateBuffer
 
 	// CreateFn / DeleteFn let individual tests override behavior (e.g. to
 	// inject errors). Nil = use the default in-memory implementation.
@@ -43,8 +84,9 @@ type MockMachineService struct {
 
 func NewMockMachineService() *MockMachineService {
 	m := &MockMachineService{
-		hosts:      make(map[string]*hetzner.HostConnectionInfo),
-		containers: make(map[string]bool),
+		hosts:           make(map[string]*hetzner.HostConnectionInfo),
+		containers:      make(map[string]bool),
+		spectateBuffers: make(map[string]*MockSpectateBuffer),
 	}
 	m.nextHost.Store(1000)
 
@@ -59,15 +101,50 @@ func NewMockMachineService() *MockMachineService {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		// Don't actually parse the body — real agent does, mock just acks.
-		_, _ = io.Copy(io.Discard, r.Body)
+		// Parse the payload so we can register the spectate_id buffer up
+		// front — the matchmaker uploader expects /spectate/<id> to be
+		// reachable as soon as the container is "started."
+		var req struct {
+			SpectateID string `json:"spectate_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
 		idBytes := make([]byte, 8)
 		rand.Read(idBytes)
 		containerID := "mock-ctr-" + hex.EncodeToString(idBytes)
 		m.mu.Lock()
 		m.containers[containerID] = true
+		if req.SpectateID != "" {
+			if _, ok := m.spectateBuffers[req.SpectateID]; !ok {
+				m.spectateBuffers[req.SpectateID] = &MockSpectateBuffer{}
+			}
+		}
 		m.mu.Unlock()
 		json.NewEncoder(w).Encode(map[string]string{"container_id": containerID})
+	})
+
+	mux.HandleFunc("/spectate/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/spectate/")
+		m.mu.Lock()
+		buf := m.spectateBuffers[id]
+		m.mu.Unlock()
+		if buf == nil {
+			// Mirror the real agent: missing dir returns 200 + empty.
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		offset, _ := strconv.ParseInt(r.URL.Query().Get("offset"), 10, 64)
+		max := 1 << 18
+		if v := r.URL.Query().Get("max"); v != "" {
+			if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+				max = parsed
+			}
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Write(buf.bytesFrom(offset, max))
 	})
 	mux.HandleFunc("/containers/", func(w http.ResponseWriter, r *http.Request) {
 		// Path looks like /containers/<id> or /containers/<id>/{health,logs}.
@@ -199,6 +276,16 @@ func (m *MockMachineService) ActiveHosts() int {
 	return len(m.hosts)
 }
 
+// SpectateBuffer returns the per-spectate-id buffer the mock agent serves.
+// Tests use it to push bytes into the mock stream so the matchmaker's
+// uploader has something to chunk into S3. Returns nil when no container
+// has been started with that ID yet.
+func (m *MockMachineService) SpectateBuffer(spectateID string) *MockSpectateBuffer {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.spectateBuffers[spectateID]
+}
+
 // ActiveContainers returns the number of game containers the mock agent
 // has been asked to start and not stop. This is the per-match counter:
 // matches add a container, match-end / GC removes it.
@@ -257,4 +344,110 @@ func (s *MockStorageService) GetObject(ctx context.Context, key string) ([]byte,
 		return nil, fmt.Errorf("key not found: %s", key)
 	}
 	return append([]byte(nil), data...), nil
+}
+
+func (s *MockStorageService) PutSpectateChunk(ctx context.Context, matchID string, seq int, data []byte) error {
+	key := fmt.Sprintf("live/%s/%d.bin", matchID, seq)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.objects[key] = append([]byte(nil), data...)
+	return nil
+}
+
+func (s *MockStorageService) PutSpectateManifest(ctx context.Context, matchID string, manifest []byte) error {
+	key := fmt.Sprintf("live/%s/manifest.json", matchID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.objects[key] = append([]byte(nil), manifest...)
+	return nil
+}
+
+func (s *MockStorageService) GetSpectateManifest(ctx context.Context, matchID string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if data, ok := s.objects[fmt.Sprintf("replay/%s/manifest.json", matchID)]; ok {
+		return append([]byte(nil), data...), nil
+	}
+	if data, ok := s.objects[fmt.Sprintf("live/%s/manifest.json", matchID)]; ok {
+		return append([]byte(nil), data...), nil
+	}
+	return nil, aws.ErrNotFound
+}
+
+func (s *MockStorageService) GetSpectateChunk(ctx context.Context, matchID string, seq int) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if data, ok := s.objects[fmt.Sprintf("replay/%s/%d.bin", matchID, seq)]; ok {
+		return append([]byte(nil), data...), nil
+	}
+	if data, ok := s.objects[fmt.Sprintf("live/%s/%d.bin", matchID, seq)]; ok {
+		return append([]byte(nil), data...), nil
+	}
+	return nil, aws.ErrNotFound
+}
+
+func (s *MockStorageService) MoveSpectateLiveToReplay(ctx context.Context, matchID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	manifestKey := fmt.Sprintf("live/%s/manifest.json", matchID)
+	manifestBytes, ok := s.objects[manifestKey]
+	if !ok {
+		return nil
+	}
+	var m struct {
+		MatchID    string `json:"match_id"`
+		StartedAt  string `json:"started_at"`
+		LatestSeq  int    `json:"latest_seq"`
+		ChunkCount int    `json:"chunk_count"`
+		Finalized  bool   `json:"finalized"`
+	}
+	if err := json.Unmarshal(manifestBytes, &m); err != nil {
+		return err
+	}
+
+	for seq := 0; seq < m.ChunkCount; seq++ {
+		liveKey := fmt.Sprintf("live/%s/%d.bin", matchID, seq)
+		replayKey := fmt.Sprintf("replay/%s/%d.bin", matchID, seq)
+		if data, exists := s.objects[liveKey]; exists {
+			s.objects[replayKey] = append([]byte(nil), data...)
+		}
+	}
+	m.Finalized = true
+	finalized, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	s.objects[fmt.Sprintf("replay/%s/manifest.json", matchID)] = finalized
+	for seq := 0; seq < m.ChunkCount; seq++ {
+		delete(s.objects, fmt.Sprintf("live/%s/%d.bin", matchID, seq))
+	}
+	delete(s.objects, manifestKey)
+	return nil
+}
+
+// SpectateObjectKeys returns sorted keys under the given prefix. Lets
+// tests assert on what the uploader put in S3 without poking at internal
+// fields.
+func (s *MockStorageService) SpectateObjectKeys(prefix string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0)
+	for k := range s.objects {
+		if strings.HasPrefix(k, prefix) {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// SpectateObject returns the bytes for a stored key, or nil if not present.
+func (s *MockStorageService) SpectateObject(key string) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if data, ok := s.objects[key]; ok {
+		return append([]byte(nil), data...)
+	}
+	return nil
 }

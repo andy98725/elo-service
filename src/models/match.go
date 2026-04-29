@@ -21,8 +21,14 @@ type Match struct {
 	GuestIDs         pq.StringArray `json:"guest_ids" gorm:"type:text[];default:'{}'"`
 	AuthCode         string         `json:"auth_code" gorm:"not null"`
 	Status           string         `json:"status" gorm:"not null"`
-	CreatedAt        time.Time      `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt        time.Time      `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	// SpectateEnabled is the *resolved* per-match flag — game's
+	// SpectateEnabled AND any per-match override (lobby host can pass
+	// spectate=false). The override is disable-only; a match cannot
+	// enable spectating on a non-spectate game. Stored so the spectator
+	// route doesn't have to re-derive it from game + lobby.
+	SpectateEnabled bool      `json:"spectate_enabled" gorm:"default:false"`
+	CreatedAt       time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt       time.Time `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 }
 
 type MatchResp struct {
@@ -61,7 +67,11 @@ func (m *Match) ConnectionAddress() string {
 // a transaction so the match row commits atomically with its referenced
 // ServerInstance — see CreateServerInstance for the failure mode this
 // guards against.
-func MatchStarted(db *gorm.DB, gameID string, serverInstanceID string, authCode string, playerIDs []string) (*Match, error) {
+//
+// spectateEnabled is the resolved flag — caller is expected to have already
+// AND'd the game-level flag with any per-match override (lobby's spectate
+// param). This function does not re-validate.
+func MatchStarted(db *gorm.DB, gameID string, serverInstanceID string, authCode string, playerIDs []string, spectateEnabled bool) (*Match, error) {
 	var users []User
 	var guestIDs []string
 
@@ -80,6 +90,7 @@ func MatchStarted(db *gorm.DB, gameID string, serverInstanceID string, authCode 
 		GuestIDs:         guestIDs,
 		AuthCode:         authCode,
 		Status:           "started",
+		SpectateEnabled:  spectateEnabled,
 	}
 
 	if err := db.Create(match).Error; err != nil {
@@ -137,6 +148,23 @@ func GetMatchesUnderway(page, pageSize int) ([]Match, int, error) {
 		nextPage = -1
 	}
 	return matches, nextPage, result.Error
+}
+
+// GetSpectatableLiveMatchesInGame returns every status='started' match in
+// the given game that has SpectateEnabled=true. Used by the discovery route
+// so non-participants can find live matches they're allowed to tail.
+//
+// Caller is expected to have already verified that the game itself has
+// SpectateEnabled=true; this function doesn't re-check (it'd just return
+// an empty list since match.SpectateEnabled is the AND of the game flag
+// and the per-match override).
+func GetSpectatableLiveMatchesInGame(gameID string) ([]Match, error) {
+	var matches []Match
+	err := matchQuery().
+		Where("game_id = ? AND status = ? AND spectate_enabled = ?", gameID, "started", true).
+		Order("created_at ASC").
+		Find(&matches).Error
+	return matches, err
 }
 
 // GetActiveMatchesInGameForPlayer returns every status='started' match in

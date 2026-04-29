@@ -39,6 +39,7 @@ type CreateGameRequest struct {
 	MetadataEnabled         bool    `json:"metadata_enabled"`
 	PublicResults           *bool   `json:"public_results"`
 	PublicMatchLogs         *bool   `json:"public_match_logs"`
+	SpectateEnabled         *bool   `json:"spectate_enabled"`
 }
 
 // CreateGame godoc
@@ -81,6 +82,7 @@ func CreateGame(ctx echo.Context) error {
 		MetadataEnabled:         req.MetadataEnabled,
 		PublicResults:           req.PublicResults,
 		PublicMatchLogs:         req.PublicMatchLogs,
+		SpectateEnabled:         req.SpectateEnabled,
 	}, *user)
 	if err != nil {
 		if isUniqueConstraintViolation(err) {

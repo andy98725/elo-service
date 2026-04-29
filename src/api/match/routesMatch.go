@@ -18,5 +18,11 @@ func InitRoutes(e *echo.Echo) error {
 	// Reconnect: rediscover active matches in a game after a page reload.
 	e.GET("/games/:gameID/match/me", GetMyActiveMatches, auth.RequireUserOrGuestAuth)
 
+	// Spectator discovery: list live matches in a spectate-enabled game.
+	e.GET("/games/:gameID/matches/live", GetLiveMatchesInGame, auth.RequireUserOrGuestAuth)
+
+	// Spectator stream proxy: long-poll over the S3-backed chunks for one match.
+	e.GET("/matches/:matchID/stream", GetMatchStream, auth.RequireUserOrGuestAuth)
+
 	return nil
 }

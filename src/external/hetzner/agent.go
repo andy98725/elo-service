@@ -16,6 +16,11 @@ type ContainerConfig struct {
 	HostPorts []int64  `json:"host_ports"`
 	Token     string   `json:"token"`
 	PlayerIDs []string `json:"player_ids"`
+	// SpectateID names the host-side directory the agent mounts at
+	// /shared/ in the container. The matchmaker generates a fresh UUID
+	// per container; the agent uses it as the URL component on
+	// /spectate/<id> when the matchmaker uploader pulls bytes.
+	SpectateID string `json:"spectate_id"`
 }
 
 type startContainerResponse struct {
@@ -75,8 +80,14 @@ func StartContainer(ctx context.Context, hostIP string, agentPort int64, agentTo
 }
 
 // StopContainer tells the host agent to stop and remove a running container.
-func StopContainer(ctx context.Context, hostIP string, agentPort int64, agentToken string, containerID string) error {
-	url := agentURL(hostIP, agentPort, "/containers/"+containerID)
+// spectateID, when non-empty, is forwarded as a query param so the agent
+// can clean up the host-side spectator dir at the same time.
+func StopContainer(ctx context.Context, hostIP string, agentPort int64, agentToken string, containerID, spectateID string) error {
+	path := "/containers/" + containerID
+	if spectateID != "" {
+		path += "?spectate_id=" + spectateID
+	}
+	url := agentURL(hostIP, agentPort, path)
 	resp, err := agentDo(ctx, http.MethodDelete, url, agentToken, nil)
 	if err != nil {
 		return fmt.Errorf("stop container: %w", err)
@@ -87,6 +98,26 @@ func StopContainer(ctx context.Context, hostIP string, agentPort int64, agentTok
 		return agentError(resp)
 	}
 	return nil
+}
+
+// GetSpectateChunk pulls a slice of the spectator stream for a container
+// from the host agent's GET /spectate/<id>?offset=N route. Returns the
+// raw bytes (game-defined format). When the file is empty or the
+// game server hasn't created it yet, returns an empty body and nil
+// error — caller treats as "no new bytes this poll."
+func GetSpectateChunk(ctx context.Context, hostIP string, agentPort int64, agentToken string, spectateID string, offset int64, max int) ([]byte, error) {
+	path := fmt.Sprintf("/spectate/%s?offset=%d&max=%d", spectateID, offset, max)
+	url := agentURL(hostIP, agentPort, path)
+	resp, err := agentDo(ctx, http.MethodGet, url, agentToken, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get spectate chunk: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, agentError(resp)
+	}
+	return io.ReadAll(resp.Body)
 }
 
 // GetContainerLogs fetches the full stdout+stderr log for a container from the host agent.

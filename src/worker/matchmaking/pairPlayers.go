@@ -13,6 +13,8 @@ import (
 	extRedis "github.com/andy98725/elo-service/src/external/redis"
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
+	"github.com/andy98725/elo-service/src/worker/spectator"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -139,7 +141,13 @@ func notifyError(ctx context.Context, gameID string, players []string, msg strin
 // + Match, and notifies all paired players. Exported so the lobby flow can
 // reuse it after a host runs `/start` — same handshake, same backing
 // machinery.
-func StartMatch(ctx context.Context, gameID string, game *models.Game, players []string) error {
+//
+// spectateOverride is the lobby-side opt-out: pass &false to disable
+// spectating for this specific match even when the game has it enabled.
+// Pass nil (the matchmaking-queue path) to inherit the game flag as-is.
+// The override is disable-only — it cannot enable spectating on a game
+// where Game.SpectateEnabled is false.
+func StartMatch(ctx context.Context, gameID string, game *models.Game, players []string, spectateOverride *bool) error {
 	slog.Info("Starting match", "gameID", gameID, "players", players)
 
 	gamePorts := []int64(game.MatchmakingMachinePorts)
@@ -222,12 +230,19 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 		return fmt.Errorf("generate auth token: %w", err)
 	}
 
+	// Always generate a spectate ID; the agent always mounts /shared/.
+	// Whether the matchmaker actually pulls bytes is governed by
+	// match.SpectateEnabled below — this just keeps the contract
+	// uniform for game-server implementers.
+	spectateID := uuid.New().String()
+
 	containerID, err := hetzner.StartContainer(ctx, host.PublicIP, host.AgentPort, host.AgentToken, hetzner.ContainerConfig{
-		Image:     game.MatchmakingMachineName,
-		GamePorts: gamePorts,
-		HostPorts: hostPorts,
-		Token:     authToken,
-		PlayerIDs: players,
+		Image:      game.MatchmakingMachineName,
+		GamePorts:  gamePorts,
+		HostPorts:  hostPorts,
+		Token:      authToken,
+		PlayerIDs:  players,
+		SpectateID: spectateID,
 	})
 	if err != nil {
 		slog.Error("Failed to start game container", "error", err, "hostID", host.ID)
@@ -242,22 +257,32 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 	// match-driven GC and stranded forever.
 	var match *models.Match
 	if err := server.S.DB.Transaction(func(tx *gorm.DB) error {
-		si, err := models.CreateServerInstance(tx, host.ID, containerID, authToken, gamePorts, hostPorts)
+		si, err := models.CreateServerInstance(tx, host.ID, containerID, authToken, spectateID, gamePorts, hostPorts)
 		if err != nil {
 			return fmt.Errorf("create server instance: %w", err)
 		}
-		match, err = models.MatchStarted(tx, gameID, si.ID, authToken, players)
+		// Resolve spectate flag: game-level is the floor; lobby override
+		// can only disable, never enable.
+		spectateEnabled := game.SpectateEnabled
+		if spectateOverride != nil && !*spectateOverride {
+			spectateEnabled = false
+		}
+		match, err = models.MatchStarted(tx, gameID, si.ID, authToken, players, spectateEnabled)
 		if err != nil {
 			return fmt.Errorf("create match: %w", err)
 		}
 		return nil
 	}); err != nil {
 		slog.Error("Failed to persist server instance/match", "error", err)
-		hetzner.StopContainer(context.Background(), host.PublicIP, host.AgentPort, host.AgentToken, containerID)
+		hetzner.StopContainer(context.Background(), host.PublicIP, host.AgentPort, host.AgentToken, containerID, spectateID)
 		models.FreePorts(host.ID, hostPorts)
 		notifyError(ctx, gameID, players, "internal error")
 		return err
 	}
+
+	// Kick off the spectator uploader. No-op when match.SpectateEnabled
+	// is false; runs in the background until EndMatch calls spectator.Stop.
+	spectator.Start(match, host, spectateID)
 
 	for _, player := range players {
 		server.S.Redis.PublishMatchReady(ctx, gameID, player, "match_"+match.ID)
@@ -332,7 +357,7 @@ func pairFIFO(ctx context.Context, queueID, gameID string, game *models.Game) bo
 			break
 		}
 
-		if err := StartMatch(ctx, gameID, game, players); err != nil {
+		if err := StartMatch(ctx, gameID, game, players, nil); err != nil {
 			continue
 		}
 		paired = true
@@ -442,7 +467,7 @@ func pairByRating(ctx context.Context, queueID, gameID string, game *models.Game
 			slog.Error("Failed to remove paired players from queue", "error", err, "queueID", queueID)
 			return paired
 		}
-		if err := StartMatch(ctx, gameID, game, groupIDs); err != nil {
+		if err := StartMatch(ctx, gameID, game, groupIDs, nil); err != nil {
 			// StartMatch already pushed players back on capacity errors;
 			// other errors leave them out (they'll re-queue or time out).
 			continue

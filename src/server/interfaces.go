@@ -33,6 +33,33 @@ type StorageService interface {
 	// detects through the AWSClient.ErrNotFound sentinel.
 	PutObject(ctx context.Context, key string, body []byte) error
 	GetObject(ctx context.Context, key string) ([]byte, error)
+
+	// Spectator stream: chunked per-match objects under live/<matchID>/
+	// during the match. Manifest is rewritten after each chunk so a
+	// spectator polling the route can find the latest seq cheaply
+	// (one GET) without listing the prefix. Slice 4 will move objects
+	// from live/ to replay/ on EndMatch and apply a 7-day lifecycle to
+	// replay/.
+	PutSpectateChunk(ctx context.Context, matchID string, seq int, data []byte) error
+	PutSpectateManifest(ctx context.Context, matchID string, manifest []byte) error
+
+	// GetSpectateManifest returns the manifest bytes — preferring
+	// replay/<matchID>/manifest.json (post-EndMatch) and falling back
+	// to live/<matchID>/manifest.json for in-progress matches. Returns
+	// ErrNotFound when neither prefix has the match.
+	GetSpectateManifest(ctx context.Context, matchID string) ([]byte, error)
+	// GetSpectateChunk reads one sequenced chunk, applying the same
+	// replay-then-live preference as GetSpectateManifest. Slice 4
+	// guarantees a finalized replay/ manifest is only written after all
+	// replay/ chunks land, so a spectator that sees replay's manifest
+	// will find every chunk it points at.
+	GetSpectateChunk(ctx context.Context, matchID string, seq int) ([]byte, error)
+	// MoveSpectateLiveToReplay copies every live/<matchID>/* object to
+	// the replay/ prefix, writes a finalized manifest there, and deletes
+	// the live/ versions. Order: copy chunks → put finalized replay
+	// manifest → delete live chunks → delete live manifest. Spectators
+	// only ever see one consistent prefix per request.
+	MoveSpectateLiveToReplay(ctx context.Context, matchID string) error
 }
 
 // DNSService is the per-host DNS-record CRUD surface. Production is satisfied

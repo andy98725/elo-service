@@ -3,6 +3,7 @@ package aws
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -80,6 +81,136 @@ func (c *AWSClient) PutObject(ctx context.Context, key string, body []byte) erro
 		ContentLength: aws.Int64(int64(len(body))),
 	})
 	return err
+}
+
+// PutSpectateChunk writes one sequenced chunk of a match's spectator
+// stream to S3 at live/<matchID>/<seq>.bin. Chunks are opaque bytes — the
+// game-server picks the format. See manifest at live/<matchID>/manifest.json
+// for the cursor a spectator needs to walk forward.
+func (c *AWSClient) PutSpectateChunk(ctx context.Context, matchID string, seq int, data []byte) error {
+	key := fmt.Sprintf("live/%s/%d.bin", matchID, seq)
+	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(c.bucketName),
+		Key:           aws.String(key),
+		Body:          bytes.NewReader(data),
+		ContentLength: aws.Int64(int64(len(data))),
+	})
+	return err
+}
+
+// PutSpectateManifest overwrites live/<matchID>/manifest.json with the
+// caller-provided JSON. Spectator clients GET the manifest to learn the
+// latest_seq before issuing chunk reads.
+func (c *AWSClient) PutSpectateManifest(ctx context.Context, matchID string, manifest []byte) error {
+	key := fmt.Sprintf("live/%s/manifest.json", matchID)
+	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(c.bucketName),
+		Key:           aws.String(key),
+		Body:          bytes.NewReader(manifest),
+		ContentLength: aws.Int64(int64(len(manifest))),
+		ContentType:   aws.String("application/json"),
+	})
+	return err
+}
+
+// GetSpectateManifest tries replay/ first (post-EndMatch) then live/
+// (in-progress). ErrNotFound only when neither prefix has the match.
+func (c *AWSClient) GetSpectateManifest(ctx context.Context, matchID string) ([]byte, error) {
+	if data, err := c.GetObject(ctx, fmt.Sprintf("replay/%s/manifest.json", matchID)); err == nil {
+		return data, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	return c.GetObject(ctx, fmt.Sprintf("live/%s/manifest.json", matchID))
+}
+
+// GetSpectateChunk applies the same replay-then-live preference as the
+// manifest. Slice 4 guarantees finalized replay/ manifests are only
+// written after every chunk has been copied, so a spectator that sees
+// the replay manifest will find each chunk seq it points at.
+func (c *AWSClient) GetSpectateChunk(ctx context.Context, matchID string, seq int) ([]byte, error) {
+	if data, err := c.GetObject(ctx, fmt.Sprintf("replay/%s/%d.bin", matchID, seq)); err == nil {
+		return data, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	return c.GetObject(ctx, fmt.Sprintf("live/%s/%d.bin", matchID, seq))
+}
+
+// MoveSpectateLiveToReplay implements the live→replay rotation. Order
+// matters for the spectator concurrency model:
+//   1. Read live manifest (we need chunk_count to enumerate).
+//   2. Copy every live/<matchID>/<seq>.bin to replay/<matchID>/<seq>.bin.
+//   3. Write replay/<matchID>/manifest.json with finalized=true.
+//      Now spectators see replay's manifest first; replay reads succeed.
+//   4. Delete the live/ chunks + live/ manifest.
+// A failure mid-2 leaves duplicate copies but that's harmless. A failure
+// after 3 leaves orphan live/ objects that should be cleaned up by an
+// out-of-band sweep — log loud and move on.
+func (c *AWSClient) MoveSpectateLiveToReplay(ctx context.Context, matchID string) error {
+	manifestKey := fmt.Sprintf("live/%s/manifest.json", matchID)
+	manifestBytes, err := c.GetObject(ctx, manifestKey)
+	if err != nil {
+		// No live manifest = nothing to move. Common case for
+		// non-spectate matches and matches that ended before any
+		// chunks were written.
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		return fmt.Errorf("read live manifest: %w", err)
+	}
+
+	var m struct {
+		MatchID    string `json:"match_id"`
+		StartedAt  string `json:"started_at"`
+		LatestSeq  int    `json:"latest_seq"`
+		ChunkCount int    `json:"chunk_count"`
+		Finalized  bool   `json:"finalized"`
+	}
+	if err := json.Unmarshal(manifestBytes, &m); err != nil {
+		return fmt.Errorf("parse live manifest: %w", err)
+	}
+
+	for seq := 0; seq < m.ChunkCount; seq++ {
+		src := fmt.Sprintf("%s/live/%s/%d.bin", c.bucketName, matchID, seq)
+		dst := fmt.Sprintf("replay/%s/%d.bin", matchID, seq)
+		if _, err := c.s3.CopyObject(ctx, &s3.CopyObjectInput{
+			Bucket:     aws.String(c.bucketName),
+			CopySource: aws.String(src),
+			Key:        aws.String(dst),
+		}); err != nil {
+			return fmt.Errorf("copy chunk %d: %w", seq, err)
+		}
+	}
+
+	m.Finalized = true
+	finalizedManifest, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("marshal finalized manifest: %w", err)
+	}
+	if _, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        aws.String(c.bucketName),
+		Key:           aws.String(fmt.Sprintf("replay/%s/manifest.json", matchID)),
+		Body:          bytes.NewReader(finalizedManifest),
+		ContentLength: aws.Int64(int64(len(finalizedManifest))),
+		ContentType:   aws.String("application/json"),
+	}); err != nil {
+		return fmt.Errorf("write replay manifest: %w", err)
+	}
+
+	// Past this point, spectators read from replay/. Delete the live/
+	// versions; failure here leaks storage but doesn't break correctness.
+	for seq := 0; seq < m.ChunkCount; seq++ {
+		_, _ = c.s3.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(c.bucketName),
+			Key:    aws.String(fmt.Sprintf("live/%s/%d.bin", matchID, seq)),
+		})
+	}
+	_, _ = c.s3.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(c.bucketName),
+		Key:    aws.String(manifestKey),
+	})
+	return nil
 }
 
 func (c *AWSClient) GetObject(ctx context.Context, key string) ([]byte, error) {

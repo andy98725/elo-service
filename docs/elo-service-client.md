@@ -167,7 +167,8 @@ Game listings return:
       "elo_strategy": "unranked",
       "metadata_enabled": false,
       "public_results": true,
-      "public_match_logs": false
+      "public_match_logs": false,
+      "spectate_enabled": false
     }
   ],
   "nextPage": 1
@@ -366,6 +367,76 @@ A player can be in multiple started matches in the same game at once (the matchm
 
 **Guest caveat.** Guest identity lives entirely in the JWT. If the page reloads without preserving the token (localStorage, cookie, or wherever your client stashes it), `/guest/login` mints a new ID and this endpoint returns empty for the new identity. Native clients with stable storage are unaffected; browser clients should persist the token before they need to reconnect.
 
+### Discovering live matches (spectator)
+
+Games can opt into letting non-participants discover ongoing matches by setting `spectate_enabled=true` at game creation (or update). When that flag is on:
+
+```http
+GET /games/<gameID>/matches/live
+Authorization: Bearer <token>
+```
+
+Response `200`:
+
+```json
+{
+  "matches": [
+    {
+      "match_id":   "<uuid>",
+      "started_at": "2026-04-29T08:24:04Z",
+      "players":    ["<user-uuid>", …],
+      "guest_ids":  ["g_…", …],
+      "has_stream": false
+    }
+  ]
+}
+```
+
+`404` when the game itself doesn't have `spectate_enabled` (regardless of the caller — it's the game's choice, not a per-user permission). Empty `matches` array when no started matches exist.
+
+`has_stream` answers "is this match actually streaming bytes right now?" — wire it to your "Watch" button. **It is always `false` today** (slice 1 ships discovery only); the spectator stream pipeline lands later. The connection details (server host/ports) are deliberately not in this response — spectators don't dial the game server directly; they consume the matchmaker-proxied stream once that route exists.
+
+**Per-match override (lobbies only).** A lobby host can disable spectating on a single match by passing `?spectate=false` to `/lobby/host`. The flag is **disable-only** — passing `spectate=true` on a non-spectate game does nothing. Matches paired through the matchmaking queue inherit the game flag with no override.
+
+### Tailing a spectator stream
+
+Once a match shows `has_stream: true` in discovery, you can tail its near-live byte stream via:
+
+```http
+GET /matches/<matchID>/stream?cursor=<int>
+Authorization: Bearer <token>
+```
+
+- **First call:** pass `cursor=0`. The server returns whatever bytes the game server has produced so far (concatenated chunks).
+- **Subsequent calls:** pass the value of the `X-Spectate-Cursor` response header from the prior call. The server returns only bytes produced since then.
+- **Long-poll:** when the cursor is caught up, the request blocks for up to ~30 seconds before returning. If new bytes arrive in that window, you get them immediately. Otherwise the response is empty (200 + 0 bytes, same cursor).
+- **EOF:** once `X-Spectate-EOF: true` appears, the match is over and no more bytes are coming. Stop polling.
+
+The body is `application/octet-stream` — **opaque bytes whose format is defined by the game server**, not the matchmaker. You decode them the same way the game's own client does (NDJSON of state diffs, length-prefixed binary frames, plain text — whatever the game emits to `/shared/spectate.stream`).
+
+```js
+async function tailSpectatorStream(matchID, token, onBytes) {
+  let cursor = 0;
+  while (true) {
+    const r = await fetch(`/matches/${matchID}/stream?cursor=${cursor}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (r.status === 404) break;             // not spectatable / match gone
+    const eof = r.headers.get("X-Spectate-EOF") === "true";
+    cursor = parseInt(r.headers.get("X-Spectate-Cursor"), 10);
+    const buf = new Uint8Array(await r.arrayBuffer());
+    if (buf.length > 0) onBytes(buf);
+    if (eof) break;
+  }
+}
+```
+
+**Latency.** Round-trip is roughly `chunk_interval (~1s) + S3 RTT + your poll interval` — typically 5–15 seconds behind the live game. Don't promise real-time spectating; this is a delayed broadcast.
+
+**Auth.** User or guest tokens both work. There's no per-spectator limit yet — that's a future-PR concern when load actually warrants it.
+
+**Replay archive.** When a match ends, the matchmaker moves the chunks out of the live tier into a replay archive and finalizes the manifest. The same `/matches/<matchID>/stream` endpoint serves the replay — your client doesn't need a different code path. The replay returns `X-Spectate-EOF: true` immediately on first poll. Replays are **kept indefinitely** today, so a `match_id` from days, weeks, or months ago should still tail successfully. (If retention ever changes, this doc will too.)
+
 ---
 
 ## Match history & results
@@ -396,7 +467,7 @@ Lobbies are only available for games with `lobby_enabled=true` (default).
 ### Host a lobby
 
 ```
-GET /lobby/host?gameID=<uuid>&tags=tag1,tag2&metadata=<string>&password=<string>&private=<bool>&token=<jwt>
+GET /lobby/host?gameID=<uuid>&tags=tag1,tag2&metadata=<string>&password=<string>&private=<bool>&spectate=<bool>&token=<jwt>
 ```
 
 Optional:
@@ -404,6 +475,7 @@ Optional:
 - `metadata` — opaque string stored on the lobby record (visible to all joiners).
 - `password` — when set, joiners must supply the same value on `/lobby/join` to enter. Stored bcrypt-hashed; max 72 bytes (bcrypt's input limit). Only the boolean `password_protected` is exposed on `/lobby/find` — the hash never leaves the server.
 - `private` — when truthy (`1`/`true`), the lobby is **excluded from `/lobby/find`**. Joiners must be given the lobby ID directly (e.g. via an out-of-band invite link). Effectively "unlisted" — anyone with the ID can still `/lobby/join`, so combine with `password` if you want both link-secrecy and a join gate.
+- `spectate` — per-match override of the game's `spectate_enabled`. **Disable-only**: pass `false` to keep this match out of `/games/<gameID>/matches/live` even on a spectate-enabled game. Passing `true` on a non-spectate game has no effect. Default: inherit the game flag.
 
 Upgrades to WebSocket. The connecting player **is** the host. The host's `lobby_joined` ack echoes back `"private": <bool>` so you can confirm what was created.
 
@@ -655,6 +727,8 @@ WebSocket failures use the in-band `{"status": "error", "error": …}` frame ins
 | `GET`  | `/match/{matchID}` | user | Get one match (participant or owner) |
 | `GET`  | `/match/game/{gameID}` | user | Paginated matches for a game |
 | `GET`  | `/games/{gameID}/match/me` | user/guest | Active matches you're in (for reconnect) |
+| `GET`  | `/games/{gameID}/matches/live` | user/guest | Spectatable live matches (404 if game `spectate_enabled=false`) |
+| `GET`  | `/matches/{matchID}/stream` | user/guest | Long-poll spectator stream (404 if match `spectate_enabled=false`) |
 | `GET`  | `/lobby/host` | user/guest | **WebSocket** host lobby |
 | `GET`  | `/lobby/find` | user/guest | List lobbies |
 | `GET`  | `/lobby/join` | user/guest | **WebSocket** join lobby |
