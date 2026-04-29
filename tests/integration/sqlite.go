@@ -28,7 +28,8 @@ func migrateForSQLite(db *gorm.DB) error {
 			password TEXT NOT NULL,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			is_admin INTEGER DEFAULT 0,
-			can_create_game INTEGER DEFAULT 0
+			can_create_game INTEGER DEFAULT 0,
+			deleted_at DATETIME
 		)`,
 		`CREATE TABLE IF NOT EXISTS games (
 			id TEXT PRIMARY KEY,
