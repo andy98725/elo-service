@@ -46,6 +46,12 @@ type Game struct {
 	PublicResults           bool          `json:"public_results" gorm:"default:true"`
 	PublicMatchLogs         bool          `json:"public_match_logs" gorm:"default:false"`
 	MetadataEnabled         bool          `json:"metadata_enabled" gorm:"default:false"`
+	// SpectateEnabled lets non-participants discover live matches in this
+	// game and tail the per-match spectator stream. Opt-in (default false).
+	// Distinct from PublicMatchLogs, which is post-game container stdout —
+	// the spectator stream is its own pipe written by the game server to
+	// /shared/spectate.stream and uploaded as chunked S3 objects.
+	SpectateEnabled bool `json:"spectate_enabled" gorm:"default:false"`
 }
 
 type GameResp struct {
@@ -64,6 +70,7 @@ type GameResp struct {
 	MetadataEnabled         bool     `json:"metadata_enabled"`
 	PublicResults           bool     `json:"public_results"`
 	PublicMatchLogs         bool     `json:"public_match_logs"`
+	SpectateEnabled         bool     `json:"spectate_enabled"`
 }
 
 func (u *Game) ToResp() *GameResp {
@@ -83,6 +90,7 @@ func (u *Game) ToResp() *GameResp {
 		MetadataEnabled:         u.MetadataEnabled,
 		PublicResults:           u.PublicResults,
 		PublicMatchLogs:         u.PublicMatchLogs,
+		SpectateEnabled:         u.SpectateEnabled,
 	}
 }
 
@@ -100,6 +108,7 @@ type CreateGameParams struct {
 	KFactor                 int
 	PublicMatchLogs         *bool
 	MetadataEnabled         bool
+	SpectateEnabled         *bool
 }
 
 func CreateGame(params CreateGameParams, owner User) (*Game, error) {
@@ -142,6 +151,11 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		publicMatchLogs = *params.PublicMatchLogs
 	}
 
+	spectateEnabled := false
+	if params.SpectateEnabled != nil {
+		spectateEnabled = *params.SpectateEnabled
+	}
+
 	game := &Game{
 		OwnerID:                 owner.ID,
 		Owner:                   owner,
@@ -158,6 +172,7 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 		KFactor:                 params.KFactor,
 		PublicMatchLogs:         publicMatchLogs,
 		MetadataEnabled:         params.MetadataEnabled,
+		SpectateEnabled:         spectateEnabled,
 	}
 
 	result := server.S.DB.Create(game)
@@ -209,6 +224,7 @@ type UpdateGameParams struct {
 	PublicResults           *bool   `json:"public_results"`
 	PublicMatchLogs         *bool   `json:"public_match_logs"`
 	MetadataEnabled         *bool   `json:"metadata_enabled"`
+	SpectateEnabled         *bool   `json:"spectate_enabled"`
 }
 
 func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
@@ -265,6 +281,9 @@ func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
 	}
 	if params.MetadataEnabled != nil {
 		game.MetadataEnabled = *params.MetadataEnabled
+	}
+	if params.SpectateEnabled != nil {
+		game.SpectateEnabled = *params.SpectateEnabled
 	}
 
 	result := server.S.DB.Save(game)

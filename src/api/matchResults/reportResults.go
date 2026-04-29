@@ -9,6 +9,7 @@ import (
 	"github.com/andy98725/elo-service/src/external/hetzner"
 	"github.com/andy98725/elo-service/src/models"
 	"github.com/andy98725/elo-service/src/server"
+	"github.com/andy98725/elo-service/src/worker/spectator"
 	"github.com/labstack/echo"
 )
 
@@ -64,6 +65,22 @@ func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reas
 		return "", errors.New("match is not underway")
 	}
 
+	// Stop the spectator uploader before tearing the container down so
+	// it doesn't issue a final poll against an agent whose container
+	// just disappeared. No-op when the match wasn't streaming.
+	spectator.Stop(match.ID)
+
+	// Move live/<matchID>/* to replay/<matchID>/* and write a finalized
+	// manifest. Best-effort — a failure here leaks live/ objects but
+	// doesn't break match completion. Spectators that race the move
+	// see one consistent prefix per request because Move writes the
+	// replay manifest *after* every chunk has been copied.
+	if match.SpectateEnabled {
+		if err := server.S.AWS.MoveSpectateLiveToReplay(ctx, match.ID); err != nil {
+			slog.Warn("Failed to move spectate stream to replay", "error", err, "matchID", match.ID)
+		}
+	}
+
 	status := ""
 
 	if match.ServerInstanceID != "" {
@@ -87,7 +104,7 @@ func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reas
 
 		if err := hetzner.StopContainer(ctx,
 			si.MachineHost.PublicIP, si.MachineHost.AgentPort, si.MachineHost.AgentToken,
-			si.ContainerID); err != nil {
+			si.ContainerID, si.SpectateID); err != nil {
 			slog.Error("Failed to stop game container; it may still be running", "error", err,
 				"containerID", si.ContainerID, "hostID", si.MachineHostID)
 		}

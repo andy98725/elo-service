@@ -40,6 +40,7 @@ var upgrader = websocket.Upgrader{
 // @Param        metadata query string false "Opaque metadata stored on the lobby record"
 // @Param        password query string false "Optional password; joiners must supply the same value to enter"
 // @Param        private  query bool   false "When true, lobby is excluded from /lobby/find. Joiners must be given the lobby ID directly."
+// @Param        spectate query bool   false "Per-match override of the game's SpectateEnabled flag. Default true (inherit from game). Set false to disable spectating on this match. Cannot enable spectating on a game where SpectateEnabled is false."
 // @Param        token    query string false "JWT token (alternative to Authorization header)"
 // @Router       /lobby/host [get]
 func HostLobby(ctx echo.Context) error {
@@ -88,6 +89,16 @@ func HostLobby(ctx echo.Context) error {
 	// Anything unrecognized — including empty — is treated as false.
 	private, _ := strconv.ParseBool(ctx.QueryParam("private"))
 
+	// `spectate` defaults to true (inherit the game flag). Only an
+	// explicit false disables; everything else (omitted, malformed) keeps
+	// the inheritance behavior.
+	spectate := true
+	if v := ctx.QueryParam("spectate"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			spectate = parsed
+		}
+	}
+
 	rec := &redis.LobbyRecord{
 		ID:           uuid.New().String(),
 		GameID:       gameID,
@@ -99,6 +110,7 @@ func HostLobby(ctx echo.Context) error {
 		CreatedAt:    time.Now().UTC(),
 		PasswordHash: passwordHash,
 		Private:      private,
+		Spectate:     spectate,
 	}
 
 	rctx := ctx.Request().Context()
@@ -391,7 +403,9 @@ func runHostCommand(ctx context.Context, rec *redis.LobbyRecord, game *models.Ga
 			ids = append(ids, pid)
 		}
 		server.S.Redis.PublishLobbyEvent(ctx, rec.ID, mustJSON(lobbyEvent{Event: "lobby_starting"}))
-		if err := matchmaking.StartMatch(ctx, rec.GameID, game, ids); err != nil {
+		// Pass the lobby's spectate flag as a disable-only override.
+		spectateOverride := rec.Spectate
+		if err := matchmaking.StartMatch(ctx, rec.GameID, game, ids, &spectateOverride); err != nil {
 			slog.Error("Failed to start match from lobby", "error", err, "lobbyID", rec.ID)
 			server.S.Redis.PublishLobbyEvent(ctx, rec.ID, mustJSON(lobbyEvent{
 				Event:   "player_say",

@@ -49,6 +49,7 @@ func migrateForSQLite(db *gorm.DB) error {
 			public_match_logs INTEGER DEFAULT 0,
 			metadata_enabled INTEGER DEFAULT 0,
 			lobby_enabled INTEGER DEFAULT 1,
+			spectate_enabled INTEGER DEFAULT 0,
 			FOREIGN KEY (owner_id) REFERENCES users(id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS matches (
@@ -58,6 +59,7 @@ func migrateForSQLite(db *gorm.DB) error {
 			guest_ids TEXT DEFAULT '{}',
 			auth_code TEXT NOT NULL,
 			status TEXT NOT NULL,
+			spectate_enabled INTEGER DEFAULT 0,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (game_id) REFERENCES games(id),
@@ -82,6 +84,7 @@ func migrateForSQLite(db *gorm.DB) error {
 			machine_host_id TEXT NOT NULL,
 			container_id TEXT NOT NULL,
 			auth_code TEXT NOT NULL,
+			spectate_id TEXT DEFAULT '',
 			game_ports TEXT NOT NULL DEFAULT '{}',
 			host_ports TEXT NOT NULL DEFAULT '{}',
 			status TEXT NOT NULL DEFAULT 'starting',

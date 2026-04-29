@@ -51,6 +51,13 @@ type LobbyRecord struct {
 	// joined directly with the lobby ID (and password, if set) — "unlisted"
 	// is a more accurate description than "private".
 	Private bool `json:"private"`
+	// Spectate is the host's per-match override of the game-level
+	// SpectateEnabled flag. Disable-only: passing false here turns
+	// spectating off for the started match even on a spectate-enabled
+	// game; passing true on a non-spectate game has no effect (the
+	// resolution AND happens in StartMatch). Default true so spectating
+	// follows the game flag unless the host explicitly opts out.
+	Spectate bool `json:"spectate"`
 }
 
 func lobbyKey(lobbyID string) string         { return "lobby_" + lobbyID }
@@ -83,6 +90,7 @@ func (r *Redis) CreateLobby(ctx context.Context, lobby *LobbyRecord) error {
 		"created_at", lobby.CreatedAt.Format(time.RFC3339Nano),
 		"password_hash", lobby.PasswordHash,
 		"private", strconv.FormatBool(lobby.Private),
+		"spectate", strconv.FormatBool(lobby.Spectate),
 	)
 	pipe.SAdd(ctx, lobbyIndexKey(lobby.GameID), lobby.ID)
 	_, err = pipe.Exec(ctx)
@@ -104,6 +112,13 @@ func (r *Redis) GetLobby(ctx context.Context, lobbyID string) (*LobbyRecord, err
 		_ = json.Unmarshal([]byte(raw), &tags)
 	}
 	private, _ := strconv.ParseBool(fields["private"])
+	// Default true for backwards-compat with lobbies created before this
+	// field existed — those rows just don't have the hash entry, and
+	// "spectate follows game flag" is the natural inheritance.
+	spectate := true
+	if v, ok := fields["spectate"]; ok {
+		spectate, _ = strconv.ParseBool(v)
+	}
 	return &LobbyRecord{
 		ID:           fields["id"],
 		GameID:       fields["game_id"],
@@ -115,6 +130,7 @@ func (r *Redis) GetLobby(ctx context.Context, lobbyID string) (*LobbyRecord, err
 		CreatedAt:    createdAt,
 		PasswordHash: fields["password_hash"],
 		Private:      private,
+		Spectate:     spectate,
 	}, nil
 }
 

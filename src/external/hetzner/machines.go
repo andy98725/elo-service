@@ -222,11 +222,13 @@ packages:
 
 runcmd:
   - systemctl start docker
+  - mkdir -p /var/lib/elo-spectate
   - docker pull docker.io/andy98725/game-server-host-agent:latest
   - docker run -d --name game-server-agent
       --restart always
       -p %d:8080
       -v /var/run/docker.sock:/var/run/docker.sock
+      -v /var/lib/elo-spectate:/var/lib/elo-spectate
       -e AGENT_TOKEN=%s
       docker.io/andy98725/game-server-host-agent:latest
 `
@@ -283,11 +285,13 @@ runcmd:
       --network host
       -v /etc/caddy:/etc/caddy:ro
       caddy:2 caddy run --config /etc/caddy/Caddyfile
+  - mkdir -p /var/lib/elo-spectate
   - docker pull docker.io/andy98725/game-server-host-agent:latest
   - docker run -d --name game-server-agent
       --restart always
       -p %d:8080
       -v /var/run/docker.sock:/var/run/docker.sock
+      -v /var/lib/elo-spectate:/var/lib/elo-spectate
       -e AGENT_TOKEN=%s
       -e INTERNAL_PORT_SHIFT=%d
       docker.io/andy98725/game-server-host-agent:latest

@@ -53,6 +53,27 @@ Write everything to **stdout and/or stderr**. After the match ends, the matchmak
 
 Do **not** depend on a sidecar — the production flow uses Docker logs directly. There is a `game-server-sidecar` image in this repo that tails `/shared/server.log`, but it is not currently composed alongside the game-server container by the host agent; logs come from stdout/stderr.
 
+### 2b. Spectator stream (optional, separate from logs)
+
+When the game has `spectate_enabled=true`, your container can opt into a **near-live spectator broadcast**. This is a **different pipe from logs** — separate file, separate retention, separate visibility — for game-state snapshots (board positions, score, replay frames, etc.) that strangers can tail.
+
+The contract is dead simple:
+
+- Write to **`/shared/spectate.stream`** inside your container. The agent host-mounts this directory; your bytes appear on the host filesystem instantly.
+- **Append-only.** Don't seek, don't truncate, don't rotate. The matchmaker tracks a byte offset; rewriting earlier ranges is unspecified.
+- **Format is yours.** The matchmaker passes opaque bytes through; the spectator UI knows your game and decodes them. Common shapes: NDJSON of state diffs, length-prefixed binary frames, plain text — pick whatever your client deserializes cheaply.
+- **Cadence is yours.** Write whenever you have something to broadcast. The matchmaker polls roughly every 1s, batches the new bytes into a chunk, and uploads to S3.
+
+What you don't have to do:
+
+- No HTTP server. No second port. No auth code (separate from logs and result reporting).
+- No need to handle reads — spectator clients pull from the matchmaker, not from you.
+- Nothing to do when the match ends. The matchmaker stops polling, finalizes the manifest, and the bytes get moved to a replay archive prefix automatically. Replays are retained indefinitely.
+
+Latency the spectator sees is roughly **chunk_interval + S3 RTT + spectator-client poll** — typically **5–15 seconds**. Don't promise real-time spectating to your players; this is a delayed broadcast.
+
+Opt out at any time by simply not writing to the file. Per-match opt-out is also available to lobby hosts (the `?spectate=false` parameter on `/lobby/host`).
+
 ### 3. Ports
 
 When you register your game (see below), you declare a list of ports your container exposes — e.g., `[8080, 8081]` for an HTTP+TCP setup. Each match, the host agent:

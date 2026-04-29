@@ -3,16 +3,20 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 )
@@ -34,10 +38,40 @@ type startContainerRequest struct {
 	HostPorts []int64  `json:"host_ports"`
 	Token     string   `json:"token"`
 	PlayerIDs []string `json:"player_ids"`
+	// SpectateID names a host-side directory the agent mounts into the
+	// container at /shared/. Game servers that opt into spectating write
+	// to /shared/spectate.stream; the matchmaker pulls bytes from this
+	// agent at /spectate/<spectate_id>. Generated and provided by the
+	// matchmaker; the agent only validates path safety.
+	SpectateID string `json:"spectate_id"`
 }
 
 type startContainerResponse struct {
 	ContainerID string `json:"container_id"`
+}
+
+// spectateDirRoot is the host-side root under which each container's
+// shared/ mount lives. Mounted into the agent's own container by
+// cloud-init at the same path so the agent can read the file the game
+// server writes. Distinct from container stdout / log retrieval — the
+// spectator stream is a separate pipe.
+const spectateDirRoot = "/var/lib/elo-spectate"
+
+// spectateFileName is the file the game server is expected to append to
+// inside the mounted /shared/ directory. Deliberately not `.log` to
+// reinforce that this stream is independent of the existing log pipe.
+const spectateFileName = "spectate.stream"
+
+// safeSpectateIDPattern rejects values containing anything other than
+// basic identifier characters — catches path-traversal attempts before
+// they reach the host filesystem.
+var safeSpectateIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
+
+func spectatePath(id string) (string, error) {
+	if !safeSpectateIDPattern.MatchString(id) {
+		return "", errors.New("invalid spectate_id")
+	}
+	return filepath.Join(spectateDirRoot, id), nil
 }
 
 func main() {
@@ -73,6 +107,7 @@ func main() {
 	mux.HandleFunc("GET /containers/{id}/health", handleContainerHealth)
 	mux.HandleFunc("GET /containers/{id}/logs", handleContainerLogs)
 	mux.HandleFunc("GET /containers/stats", handleContainerStats)
+	mux.HandleFunc("GET /spectate/{id}", handleSpectate)
 
 	log.Printf("Agent listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, authMiddleware(mux)); err != nil {
@@ -145,6 +180,29 @@ func handleStartContainer(w http.ResponseWriter, r *http.Request) {
 	cmd := []string{"-token", req.Token}
 	cmd = append(cmd, req.PlayerIDs...)
 
+	// Always create the spectator dir and bind it into /shared/, even
+	// for non-spectate matches: the game-server contract is uniform
+	// (write to /shared/spectate.stream if you want streaming), and an
+	// empty dir per container is essentially free. Whether the matchmaker
+	// actually pulls from /spectate/<id> is decided by Match.SpectateEnabled.
+	mounts := []mount.Mount{}
+	if req.SpectateID != "" {
+		dir, err := spectatePath(req.SpectateID)
+		if err != nil {
+			http.Error(w, "invalid spectate_id", http.StatusBadRequest)
+			return
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			http.Error(w, fmt.Sprintf("failed to create spectate dir: %v", err), http.StatusInternalServerError)
+			return
+		}
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeBind,
+			Source: dir,
+			Target: "/shared",
+		})
+	}
+
 	// TODO: add Resources (Memory, NanoCPUs) to HostConfig once /containers/stats
 	// gives us per-game footprint numbers from a real load test. Today every
 	// container on a host shares the VM's CPU/RAM unbounded — a noisy game can
@@ -152,7 +210,7 @@ func handleStartContainer(w http.ResponseWriter, r *http.Request) {
 	// counts.
 	created, err := dockerClient.ContainerCreate(ctx,
 		&container.Config{Image: req.Image, Cmd: cmd, ExposedPorts: exposedPorts},
-		&container.HostConfig{PortBindings: portBindings},
+		&container.HostConfig{PortBindings: portBindings, Mounts: mounts},
 		nil, nil, "")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to create container: %v", err), http.StatusInternalServerError)
@@ -182,7 +240,68 @@ func handleStopContainer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("failed to remove container: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	// If the matchmaker tells us the spectate_id, clean up the host-side
+	// dir so we don't leak storage. Best-effort: missing dir is fine
+	// (older containers / non-spectate matches).
+	if sid := r.URL.Query().Get("spectate_id"); sid != "" {
+		if dir, err := spectatePath(sid); err == nil {
+			os.RemoveAll(dir)
+		}
+	}
+
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleSpectate serves a slice of /var/lib/elo-spectate/<id>/spectate.stream
+// starting at ?offset=N for at most ?max=M bytes. Returns 200 with the
+// raw bytes (or empty body when caught up). Returns 404 when the
+// spectate dir is missing — usually means the match isn't streaming or
+// has been torn down. The matchmaker is the only authenticated caller.
+func handleSpectate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	dir, err := spectatePath(id)
+	if err != nil {
+		http.Error(w, "invalid spectate id", http.StatusBadRequest)
+		return
+	}
+
+	offset, _ := strconv.ParseInt(r.URL.Query().Get("offset"), 10, 64)
+	if offset < 0 {
+		offset = 0
+	}
+	const defaultMax = 1 << 18 // 256 KiB
+	max := int64(defaultMax)
+	if v := r.URL.Query().Get("max"); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil && parsed > 0 && parsed < (1<<24) {
+			max = parsed
+		}
+	}
+
+	path := filepath.Join(dir, spectateFileName)
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Either the dir doesn't exist (no streaming match) or the
+			// game server hasn't written the file yet. Return 200 + empty
+			// so the matchmaker poll loop just records "no new bytes
+			// this tick" rather than treating it as fatal.
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Error(w, fmt.Sprintf("failed to open spectate stream: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		http.Error(w, fmt.Sprintf("failed to seek: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.WriteHeader(http.StatusOK)
+	io.CopyN(w, f, max)
 }
 
 func handleContainerHealth(w http.ResponseWriter, r *http.Request) {
