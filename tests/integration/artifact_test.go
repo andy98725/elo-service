@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/andy98725/elo-service/src/models"
-	"github.com/andy98725/elo-service/src/server"
 )
 
 // uploadArtifact does a POST /match/artifact with the match's auth_code
@@ -184,18 +183,22 @@ func TestArtifactPerMatchListAndDownload(t *testing.T) {
 
 func TestArtifactListAuth_NonPublic(t *testing.T) {
 	// Non-public results: only participants / owner / admin can list.
+	// Verifies CreateGame's Select("*") fix — passing public_results=false
+	// in JSON now actually persists rather than getting swallowed by
+	// the gorm:"default:true" tag.
 	h := NewHarness(t)
 	RegisterUser(t, h.BaseURL(), "anpown", "anpown@example.com", "pass")
 	ownerToken, _ := LoginUser(t, h.BaseURL(), "anpown@example.com", "pass")
-	game := createSpectateGame(t, h.BaseURL(), ownerToken, "ArtifactNonPublic", true)
+	game := DoReq(t, "POST", h.BaseURL()+"/game", map[string]interface{}{
+		"name":                      "ArtifactNonPublic",
+		"lobby_size":                2,
+		"guests_allowed":            true,
+		"spectate_enabled":          true,
+		"public_results":            false,
+		"matchmaking_machine_name":  "docker.io/test/game:latest",
+		"matchmaking_machine_ports": []int64{8080},
+	}, ownerToken, http.StatusOK)
 	gameID := game["id"].(string)
-	// GORM swallows boolean false on insert when the column has a true
-	// default (Game.PublicResults uses gorm:"default:true"); force the
-	// column post-create via raw SQL so this test exercises the real
-	// non-public path.
-	if err := server.S.DB.Exec("UPDATE games SET public_results = 0 WHERE id = ?", gameID).Error; err != nil {
-		t.Fatalf("force public_results=0: %v", err)
-	}
 
 	matchID := pairTwoGuests(t, h, gameID)
 	matchInDB, _ := models.GetMatch(matchID)
