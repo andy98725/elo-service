@@ -34,7 +34,8 @@ const maxMetadataBytes = 4096
 // @Tags         Matchmaking
 // @Security     BearerAuth
 // @Param        gameID   query string true  "Game UUID to queue for"
-// @Param        metadata query string false "Optional sub-queue key (only honored when game.metadata_enabled=true; capped at 4 KB)"
+// @Param        queueID  query string false "Specific GameQueue UUID. Defaults to the game's primary queue (oldest by created_at) when omitted."
+// @Param        metadata query string false "Optional sub-queue key (only honored when the resolved queue's metadata_enabled=true; capped at 4 KB)"
 // @Param        token    query string false "JWT token (alternative to Authorization header)"
 // @Router       /match/join [get]
 func JoinQueueWebsocket(ctx echo.Context) error {
@@ -50,17 +51,27 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 		conn.WriteJSON(echo.Map{"status": "error", "error": "gameID is required"})
 		return nil
 	}
+	queueIDParam := ctx.QueryParam("queueID")
 	metadata := ctx.QueryParam("metadata")
 	if len(metadata) > maxMetadataBytes {
 		conn.WriteJSON(echo.Map{"status": "error", "error": "metadata exceeds maximum size"})
 		return nil
 	}
 
+	// Resolve the GameQueue up front so we can subscribe match_ready on the
+	// right per-queue channel BEFORE inserting the player into the queue
+	// list. Otherwise a publish from the worker can race the SUBSCRIBE.
+	queue, err := models.ResolveQueue(gameID, queueIDParam)
+	if err != nil {
+		conn.WriteJSON(echo.Map{"status": "error", "error": "queue not found: " + err.Error()})
+		return nil
+	}
+
 	// Listen for match ready before joining queue
 	readyChan := make(chan matchmaking.QueueResult, 1)
-	matchmaking.NotifyOnReady(ctx.Request().Context(), id, gameID, readyChan)
+	matchmaking.NotifyOnReady(ctx.Request().Context(), id, queue.ID, readyChan)
 
-	joinResult, err := matchmaking.JoinQueue(ctx.Request().Context(), id, gameID, metadata)
+	joinResult, err := matchmaking.JoinQueue(ctx.Request().Context(), id, gameID, queue.ID, metadata)
 	if err != nil {
 		slog.Warn("Failed to join queue", "error", err)
 		conn.WriteJSON(echo.Map{"status": "error", "error": err.Error()})
@@ -229,7 +240,8 @@ func statusRefresh(ctx context.Context, conn *websocket.Conn, status *string) *c
 // @Produce      json
 // @Security     BearerAuth
 // @Param        gameID   query string true  "Game UUID"
-// @Param        metadata query string false "Sub-queue key (only honored when game.metadata_enabled=true)"
+// @Param        queueID  query string false "Specific GameQueue UUID. Defaults to the game's primary queue when omitted."
+// @Param        metadata query string false "Sub-queue key (only honored when the resolved queue's metadata_enabled=true)"
 // @Success      200 {object} map[string]interface{} "players_in_queue"
 // @Failure      400 {object} echo.HTTPError
 // @Failure      500 {object} echo.HTTPError
@@ -239,12 +251,13 @@ func QueueSize(ctx echo.Context) error {
 	if gameID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "gameID is required")
 	}
+	queueIDParam := ctx.QueryParam("queueID")
 	metadata := ctx.QueryParam("metadata")
 	if len(metadata) > maxMetadataBytes {
 		return echo.NewHTTPError(http.StatusBadRequest, "metadata exceeds maximum size")
 	}
 
-	size, err := matchmaking.QueueSize(ctx.Request().Context(), gameID, metadata)
+	size, err := matchmaking.QueueSize(ctx.Request().Context(), gameID, queueIDParam, metadata)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}

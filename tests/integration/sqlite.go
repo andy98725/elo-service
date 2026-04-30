@@ -38,6 +38,17 @@ func migrateForSQLite(db *gorm.DB) error {
 			description TEXT,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			guests_allowed INTEGER DEFAULT 1,
+			public_results INTEGER DEFAULT 1,
+			public_match_logs INTEGER DEFAULT 0,
+			spectate_enabled INTEGER DEFAULT 0,
+			FOREIGN KEY (owner_id) REFERENCES users(id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS game_queues (
+			id TEXT PRIMARY KEY,
+			game_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			lobby_enabled INTEGER DEFAULT 0,
 			lobby_size INTEGER DEFAULT 2,
 			matchmaking_strategy TEXT NOT NULL DEFAULT 'random',
 			matchmaking_machine_name TEXT NOT NULL,
@@ -45,16 +56,14 @@ func migrateForSQLite(db *gorm.DB) error {
 			elo_strategy TEXT NOT NULL DEFAULT 'unranked',
 			default_rating INTEGER DEFAULT 1000,
 			k_factor INTEGER DEFAULT 32,
-			public_results INTEGER DEFAULT 1,
-			public_match_logs INTEGER DEFAULT 0,
 			metadata_enabled INTEGER DEFAULT 0,
-			lobby_enabled INTEGER DEFAULT 1,
-			spectate_enabled INTEGER DEFAULT 0,
-			FOREIGN KEY (owner_id) REFERENCES users(id)
+			UNIQUE (game_id, name),
+			FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE IF NOT EXISTS matches (
 			id TEXT PRIMARY KEY,
 			game_id TEXT NOT NULL,
+			game_queue_id TEXT NOT NULL,
 			server_instance_id TEXT,
 			guest_ids TEXT DEFAULT '{}',
 			auth_code TEXT NOT NULL,
@@ -63,6 +72,7 @@ func migrateForSQLite(db *gorm.DB) error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (game_id) REFERENCES games(id),
+			FOREIGN KEY (game_queue_id) REFERENCES game_queues(id),
 			FOREIGN KEY (server_instance_id) REFERENCES server_instances(id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS machine_hosts (
@@ -116,11 +126,12 @@ func migrateForSQLite(db *gorm.DB) error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS ratings (
 			player_id TEXT,
-			game_id TEXT,
+			game_queue_id TEXT,
 			rating INTEGER NOT NULL,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (player_id, game_id)
+			PRIMARY KEY (player_id, game_queue_id),
+			FOREIGN KEY (game_queue_id) REFERENCES game_queues(id) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE IF NOT EXISTS player_game_entries (
 			game_id TEXT NOT NULL,
@@ -181,7 +192,7 @@ func assertSchemaMatchesModels(db *gorm.DB) error {
 	cache := &sync.Map{}
 	ns := schema.NamingStrategy{}
 	checks := []interface{}{
-		&models.User{}, &models.Game{}, &models.Match{},
+		&models.User{}, &models.Game{}, &models.GameQueue{}, &models.Match{},
 		&models.MatchResult{}, &models.Rating{},
 		&models.MachineHost{}, &models.ServerInstance{},
 		&models.PlayerGameEntry{},

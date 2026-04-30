@@ -159,21 +159,41 @@ Game listings return:
       "name": "TicTacToe",
       "description": "…",
       "guests_allowed": true,
+      "public_results": true,
+      "public_match_logs": false,
+      "spectate_enabled": false,
+      "queues": [
+        {
+          "id": "<queue uuid>",
+          "game_id": "<uuid>",
+          "name": "primary",
+          "lobby_enabled": true,
+          "lobby_size": 2,
+          "matchmaking_strategy": "random",
+          "matchmaking_machine_name": "alice/tictactoe:latest",
+          "matchmaking_machine_ports": [8080],
+          "elo_strategy": "unranked",
+          "default_rating": 1000,
+          "k_factor": 32,
+          "metadata_enabled": false
+        }
+      ],
+
+      // Legacy mirror of queues[0]. Kept for backwards compat with single-queue clients.
       "lobby_enabled": true,
       "lobby_size": 2,
       "matchmaking_strategy": "random",
       "matchmaking_machine_name": "alice/tictactoe:latest",
       "matchmaking_machine_ports": [8080],
       "elo_strategy": "unranked",
-      "metadata_enabled": false,
-      "public_results": true,
-      "public_match_logs": false,
-      "spectate_enabled": false
+      "metadata_enabled": false
     }
   ],
   "nextPage": 1
 }
 ```
+
+Each game has an ordered `queues` array. The first element (`queues[0]`) is the **default queue** — the one used when matchmaking, lobby, or rating endpoints are called without an explicit `queueID`. Single-queue games (the default) need only the legacy mirror; multi-queue games (different game modes / images / ELO settings under one game) iterate `queues` and let the player pick.
 
 `nextPage` is the index to pass as `page` on the next call, **or `-1` if you've reached the end of the list** (the page returned fewer rows than `pageSize`). Stop paginating when you see `-1`.
 
@@ -192,9 +212,10 @@ GET /match/join?gameID=<uuid>&token=<jwt>
 ```
 
 Optional query params:
-- `metadata` — opaque sub-queue key, max **4096 bytes**. Only honored if the game has `metadata_enabled=true`. Players with the same `metadata` value queue together; players with different values don't match. Useful for game-mode/region segmentation. The server hashes it before use.
+- `queueID` — specific GameQueue UUID for multi-queue games (e.g. choose between `casual` and `ranked`). When omitted, defaults to the game's primary queue (`queues[0]`). Single-queue games can ignore this.
+- `metadata` — opaque sub-queue key, max **4096 bytes**. Only honored if the resolved queue has `metadata_enabled=true`. Players with the same `metadata` value queue together; players with different values don't match. Useful for further region/mode segmentation within a queue. The server hashes it before use.
 
-> **Casing matters.** The query param is `gameID` (camelCase), not `game_id`. Wrong casing is silently dropped and you'll get `"gameID is required"`.
+> **Casing matters.** The query params are `gameID` and `queueID` (camelCase), not `game_id` / `queue_id`. Wrong casing is silently dropped and you'll get `"gameID is required"`.
 
 The connection upgrades to WebSocket and starts streaming JSON status messages.
 
@@ -330,12 +351,14 @@ The game server will reject you with `403 Forbidden` if your ID isn't in its exp
 ### Queue size (HTTP)
 
 ```http
-GET /match/size?gameID=<uuid>&metadata=<string>&token=<jwt>
+GET /match/size?gameID=<uuid>&queueID=<uuid>&metadata=<string>&token=<jwt>
 ```
 
 Response `200`: `{ "players_in_queue": 4 }`. Useful for showing "Searching… (4 players in queue)" UI without having to be in the queue yourself.
 
-`metadata` is optional and follows the same rules as on `/match/join` — only honored when `metadata_enabled=true`, max 4096 bytes, and segments the count to the matching sub-queue. For metadata-segmented games, calling `/match/size` without `metadata` returns the *empty* sub-queue's size, which is rarely what you want.
+`queueID` is optional — defaults to the game's primary queue. Pass it when polling a non-default queue under a multi-queue game.
+
+`metadata` is optional and follows the same rules as on `/match/join` — only honored when the resolved queue has `metadata_enabled=true`, max 4096 bytes, and segments the count to the matching sub-queue. For metadata-segmented queues, calling `/match/size` without `metadata` returns the *empty* sub-queue's size, which is rarely what you want.
 
 ### Reconnecting after a page reload
 
@@ -520,15 +543,16 @@ Conventional names games may upload (recommended, not enforced):
 
 Lobbies are an alternative to matchmaking: a host creates a lobby, players discover it, join it, chat, and the host explicitly starts the match. The post-`/start` handshake is **identical** to matchmaking — same `match_found` payload — so the "connect to the game server" code is reusable.
 
-Lobbies are only available for games with `lobby_enabled=true` (default).
+Lobbies are only available for queues with `lobby_enabled=true` (default). The lobby inherits its `lobby_size`, image, and ELO settings from the queue it's hosted under.
 
 ### Host a lobby
 
 ```
-GET /lobby/host?gameID=<uuid>&tags=tag1,tag2&metadata=<string>&password=<string>&private=<bool>&spectate=<bool>&token=<jwt>
+GET /lobby/host?gameID=<uuid>&queueID=<uuid>&tags=tag1,tag2&metadata=<string>&password=<string>&private=<bool>&spectate=<bool>&token=<jwt>
 ```
 
 Optional:
+- `queueID` — specific GameQueue UUID. Defaults to the game's primary queue when omitted. The match started from this lobby uses that queue's image, ports, lobby size, and ELO settings.
 - `tags` — comma-separated, **first 16 tags kept** (extras silently dropped, not rejected). Searchable via `/lobby/find`.
 - `metadata` — opaque string stored on the lobby record (visible to all joiners).
 - `password` — when set, joiners must supply the same value on `/lobby/join` to enter. Stored bcrypt-hashed; max 72 bytes (bcrypt's input limit). Only the boolean `password_protected` is exposed on `/lobby/find` — the hash never leaves the server.
@@ -778,10 +802,12 @@ WebSocket failures use the in-band `{"status": "error", "error": …}` frame ins
 | `PUT`  | `/user` | user | Update own username / email (admin: `?id=<uuid>` + `can_create_game`) |
 | `PUT`  | `/user/password` | user | Rotate own password (verifies current) |
 | `DELETE` | `/user` | user | Soft-delete own account (admin: `?id=<uuid>`) |
-| `GET`  | `/game/{id}` | none | Fetch a game by UUID (public) |
+| `GET`  | `/game/{id}` | none | Fetch a game by UUID (public) — includes `queues[]` array |
 | `GET`  | `/user/game` | user | List your games |
-| `GET`  | `/match/size` | user/guest | Queue size for a game |
-| `GET`  | `/match/join` | user/guest | **WebSocket** matchmaking |
+| `GET`  | `/game/{gameID}/queue` | none | List queues for a game (oldest first; `[0]` is the default) |
+| `GET`  | `/game/{gameID}/queue/{queueID}` | none | Fetch a single queue |
+| `GET`  | `/match/size` | user/guest | Queue size — accepts optional `queueID` (defaults to primary queue) |
+| `GET`  | `/match/join` | user/guest | **WebSocket** matchmaking — accepts optional `queueID` |
 | `GET`  | `/match/{matchID}` | user | Get one match (participant or owner) |
 | `GET`  | `/match/game/{gameID}` | user | Paginated matches for a game |
 | `GET`  | `/games/{gameID}/match/me` | user/guest | Active matches you're in (for reconnect) |
@@ -790,9 +816,11 @@ WebSocket failures use the in-band `{"status": "error", "error": …}` frame ins
 | `GET`  | `/matches/{matchID}/artifacts` | user/guest | List artifacts attached to a match (gated by `public_results`) |
 | `GET`  | `/matches/{matchID}/artifacts/{name}` | user/guest | Download one artifact's bytes |
 | `GET`  | `/user/artifacts` | user/guest | Your matches that have artifacts; optional `game_id` and `name=` filters |
-| `GET`  | `/lobby/host` | user/guest | **WebSocket** host lobby |
+| `GET`  | `/lobby/host` | user/guest | **WebSocket** host lobby — accepts optional `queueID` |
 | `GET`  | `/lobby/find` | user/guest | List lobbies |
 | `GET`  | `/lobby/join` | user/guest | **WebSocket** join lobby |
+| `GET`  | `/user/rating/{gameId}` | user | Your rating in a queue (optional `queueID`, default primary) |
+| `GET`  | `/game/{gameId}/leaderboard` | none | Top-rated players in a queue (optional `queueID`, default primary) |
 | `GET`  | `/results/{matchID}` | user/guest | One match's result |
 | `GET`  | `/results/{matchID}/logs` | user/guest | Download match logs (if public) |
 | `GET`  | `/game/{gameID}/results` | user/guest | Paginated results for a game |

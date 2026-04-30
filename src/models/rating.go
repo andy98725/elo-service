@@ -9,43 +9,48 @@ import (
 	"gorm.io/gorm"
 )
 
+// Rating is keyed by (player, game_queue). Each queue maintains its own
+// ladder — a "ranked 1v1" queue and a "casual 2v2" queue under the same
+// game keep independent ratings, even for the same player. The queue's
+// DefaultRating / KFactor / ELOStrategy decide initial value and update
+// behavior; see ApplyClassicElo.
 type Rating struct {
-	PlayerID  string    `json:"player_id" gorm:"primaryKey"`
-	Player    User      `json:"player" gorm:"foreignKey:PlayerID"`
-	GameID    string    `json:"game_id" gorm:"primaryKey"`
-	Game      Game      `json:"game" gorm:"foreignKey:GameID"`
-	Rating    int       `json:"rating" gorm:"not null"`
-	CreatedAt time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt time.Time `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	PlayerID    string    `json:"player_id" gorm:"primaryKey"`
+	Player      User      `json:"player" gorm:"foreignKey:PlayerID"`
+	GameQueueID string    `json:"game_queue_id" gorm:"primaryKey"`
+	GameQueue   GameQueue `json:"game_queue" gorm:"foreignKey:GameQueueID;constraint:OnDelete:CASCADE"`
+	Rating      int       `json:"rating" gorm:"not null"`
+	CreatedAt   time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt   time.Time `json:"updated_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 }
 
 type RatingResp struct {
-	PlayerID string   `json:"player_id"`
-	Player   UserResp `json:"player"`
-	GameID   string   `json:"game_id"`
-	Game     GameResp `json:"game"`
-	Rating   int      `json:"rating"`
+	PlayerID    string        `json:"player_id"`
+	Player      UserResp      `json:"player"`
+	GameQueueID string        `json:"game_queue_id"`
+	GameQueue   GameQueueResp `json:"game_queue"`
+	Rating      int           `json:"rating"`
 }
 
 func (r *Rating) ToResp() *RatingResp {
 	return &RatingResp{
-		PlayerID: r.PlayerID,
-		Player:   *r.Player.ToResp(),
-		GameID:   r.GameID,
-		Game:     *r.Game.ToResp(),
-		Rating:   r.Rating,
+		PlayerID:    r.PlayerID,
+		Player:      *r.Player.ToResp(),
+		GameQueueID: r.GameQueueID,
+		GameQueue:   *r.GameQueue.ToResp(),
+		Rating:      r.Rating,
 	}
 }
 
-// GetLeaderboard returns the top-rated players for a game, paginated.
+// GetLeaderboard returns the top-rated players for a queue, paginated.
 // Ordered by rating descending, with player_id as a stable tiebreaker so
 // pages don't reshuffle on equal ratings. Preloads Player so the response
 // can include usernames.
-func GetLeaderboard(gameID string, page, pageSize int) ([]Rating, int, error) {
+func GetLeaderboard(gameQueueID string, page, pageSize int) ([]Rating, int, error) {
 	var ratings []Rating
 	offset := page * pageSize
 	result := server.S.DB.Preload("Player").
-		Where("game_id = ?", gameID).
+		Where("game_queue_id = ?", gameQueueID).
 		Order("rating DESC, player_id ASC").
 		Offset(offset).Limit(pageSize).
 		Find(&ratings)
@@ -59,13 +64,13 @@ func GetLeaderboard(gameID string, page, pageSize int) ([]Rating, int, error) {
 	return ratings, nextPage, nil
 }
 
-// GetRatingsForPlayers fetches current ratings for a set of players in one
-// query. Guest IDs are filtered out (no rating row exists for them) and
-// missing rows are simply absent from the returned map — the caller is
-// expected to substitute the game's DefaultRating in-memory. Does NOT
+// GetRatingsForPlayers fetches current ratings for a set of players in a
+// single queue. Guest IDs are filtered out (no rating row exists for them)
+// and missing rows are simply absent from the returned map — the caller is
+// expected to substitute the queue's DefaultRating in-memory. Does NOT
 // lazy-create rows; that is reserved for paths where the rating is about
 // to be mutated (e.g. ApplyClassicElo).
-func GetRatingsForPlayers(gameID string, playerIDs []string) (map[string]int, error) {
+func GetRatingsForPlayers(gameQueueID string, playerIDs []string) (map[string]int, error) {
 	out := map[string]int{}
 	if len(playerIDs) == 0 {
 		return out, nil
@@ -81,7 +86,7 @@ func GetRatingsForPlayers(gameID string, playerIDs []string) (map[string]int, er
 	}
 	var rows []Rating
 	if err := server.S.DB.
-		Where("game_id = ? AND player_id IN ?", gameID, nonGuests).
+		Where("game_queue_id = ? AND player_id IN ?", gameQueueID, nonGuests).
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -91,23 +96,25 @@ func GetRatingsForPlayers(gameID string, playerIDs []string) (map[string]int, er
 	return out, nil
 }
 
-func GetRating(playerID, gameID string) (*Rating, error) {
+// GetRating fetches the player's rating for a queue, lazy-creating at the
+// queue's DefaultRating on first access.
+func GetRating(playerID, gameQueueID string) (*Rating, error) {
 	var rating Rating
-	result := server.S.DB.First(&rating, "player_id = ? AND game_id = ?", playerID, gameID)
+	result := server.S.DB.First(&rating, "player_id = ? AND game_queue_id = ?", playerID, gameQueueID)
 	if result.Error == nil {
 		return &rating, nil
 	}
 
 	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		game, err := GetGame(gameID)
+		queue, err := GetGameQueue(gameQueueID)
 		if err != nil {
 			return nil, err
 		}
 
 		rating = Rating{
-			PlayerID: playerID,
-			GameID:   gameID,
-			Rating:   game.DefaultRating,
+			PlayerID:    playerID,
+			GameQueueID: gameQueueID,
+			Rating:      queue.DefaultRating,
 		}
 		if err := server.S.DB.Create(&rating).Error; err != nil {
 			return nil, err

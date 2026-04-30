@@ -23,7 +23,7 @@ import (
 // Per-player delta is K_eff * Σ_{j≠i} (S_ij − E_ij) where K_eff = K * 2 / N
 // and N is the number of non-guest players in the match. For N=2 this
 // reduces to standard Elo: K * (S − E) over the single pair.
-func ApplyClassicElo(tx *gorm.DB, game *Game, playerIDs, winnerIDs []string) error {
+func ApplyClassicElo(tx *gorm.DB, queue *GameQueue, playerIDs, winnerIDs []string) error {
 	nonGuests := make([]string, 0, len(playerIDs))
 	for _, pid := range playerIDs {
 		if !util.IsGuestID(pid) {
@@ -41,7 +41,7 @@ func ApplyClassicElo(tx *gorm.DB, game *Game, playerIDs, winnerIDs []string) err
 	}
 
 	for _, pid := range nonGuests {
-		row := &Rating{PlayerID: pid, GameID: game.ID, Rating: game.DefaultRating}
+		row := &Rating{PlayerID: pid, GameQueueID: queue.ID, Rating: queue.DefaultRating}
 		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(row).Error; err != nil {
 			return err
 		}
@@ -51,14 +51,14 @@ func ApplyClassicElo(tx *gorm.DB, game *Game, playerIDs, winnerIDs []string) err
 	for _, pid := range nonGuests {
 		var r Rating
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			First(&r, "player_id = ? AND game_id = ?", pid, game.ID).Error; err != nil {
+			First(&r, "player_id = ? AND game_queue_id = ?", pid, queue.ID).Error; err != nil {
 			return err
 		}
 		ratings = append(ratings, &r)
 	}
 
 	n := len(ratings)
-	kEff := float64(game.KFactor) * 2.0 / float64(n)
+	kEff := float64(queue.KFactor) * 2.0 / float64(n)
 	deltas := make([]float64, n)
 	for i := 0; i < n; i++ {
 		iWon := winnerSet[ratings[i].PlayerID]

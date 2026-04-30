@@ -8,14 +8,14 @@ definitions:
         description: Stores the error returned by an external dependency
       message: {}
     type: object
-  github_com_andy98725_elo-service_src_models.GameResp:
+  github_com_andy98725_elo-service_src_models.GameQueueResp:
     properties:
-      description:
-        type: string
+      default_rating:
+        type: integer
       elo_strategy:
         type: string
-      guests_allowed:
-        type: boolean
+      game_id:
+        type: string
       id:
         type: string
       k_factor:
@@ -36,11 +36,51 @@ definitions:
         type: boolean
       name:
         type: string
+    type: object
+  github_com_andy98725_elo-service_src_models.GameResp:
+    properties:
+      default_rating:
+        type: integer
+      description:
+        type: string
+      elo_strategy:
+        type: string
+      guests_allowed:
+        type: boolean
+      id:
+        type: string
+      k_factor:
+        type: integer
+      lobby_enabled:
+        description: |-
+          Legacy flat queue fields, mirrored from Queues[0]. Empty/zero
+          when the game has no queues (transient state during creation).
+        type: boolean
+      lobby_size:
+        type: integer
+      matchmaking_machine_name:
+        type: string
+      matchmaking_machine_ports:
+        items:
+          type: integer
+        type: array
+      matchmaking_strategy:
+        type: string
+      metadata_enabled:
+        type: boolean
+      name:
+        type: string
       owner:
         $ref: '#/definitions/github_com_andy98725_elo-service_src_models.UserResp'
       public_match_logs:
         type: boolean
       public_results:
+        type: boolean
+      queues:
+        items:
+          $ref: '#/definitions/github_com_andy98725_elo-service_src_models.GameQueueResp'
+        type: array
+      spectate_enabled:
         type: boolean
     type: object
   github_com_andy98725_elo-service_src_models.MatchResp:
@@ -94,6 +134,9 @@ definitions:
       k_factor:
         type: integer
       lobby_enabled:
+        description: |-
+          Legacy flat queue fields. Applied to the game's default queue.
+          Multi-queue clients should hit /game/:id/queue/:queueID directly.
         type: boolean
       lobby_size:
         type: integer
@@ -113,28 +156,15 @@ definitions:
         type: boolean
       public_results:
         type: boolean
-    type: object
-  github_com_andy98725_elo-service_src_models.UserResp:
-    properties:
-      can_create_game:
+      spectate_enabled:
         type: boolean
-      email:
-        type: string
-      id:
-        type: string
-      is_admin:
-        type: boolean
-      username:
-        type: string
     type: object
-  src_api_game.CreateGameRequest:
+  github_com_andy98725_elo-service_src_models.UpdateGameQueueParams:
     properties:
-      description:
-        type: string
+      default_rating:
+        type: integer
       elo_strategy:
         type: string
-      guests_allowed:
-        type: boolean
       k_factor:
         type: integer
       lobby_enabled:
@@ -153,9 +183,81 @@ definitions:
         type: boolean
       name:
         type: string
+    type: object
+  github_com_andy98725_elo-service_src_models.UserResp:
+    properties:
+      can_create_game:
+        type: boolean
+      email:
+        type: string
+      id:
+        type: string
+      is_admin:
+        type: boolean
+      username:
+        type: string
+    type: object
+  src_api_game.CreateGameQueueRequest:
+    properties:
+      default_rating:
+        type: integer
+      elo_strategy:
+        type: string
+      k_factor:
+        type: integer
+      lobby_enabled:
+        type: boolean
+      lobby_size:
+        type: integer
+      matchmaking_machine_name:
+        type: string
+      matchmaking_machine_ports:
+        items:
+          type: integer
+        type: array
+      matchmaking_strategy:
+        type: string
+      metadata_enabled:
+        type: boolean
+      name:
+        type: string
+    type: object
+  src_api_game.CreateGameRequest:
+    properties:
+      default_rating:
+        type: integer
+      description:
+        type: string
+      elo_strategy:
+        type: string
+      guests_allowed:
+        type: boolean
+      k_factor:
+        type: integer
+      lobby_enabled:
+        description: |-
+          Primary-queue fields. Persisted on the game's auto-created
+          "primary" queue. All optional; defaults are applied in CreateGame.
+        type: boolean
+      lobby_size:
+        type: integer
+      matchmaking_machine_name:
+        type: string
+      matchmaking_machine_ports:
+        items:
+          type: integer
+        type: array
+      matchmaking_strategy:
+        type: string
+      metadata_enabled:
+        type: boolean
+      name:
+        type: string
       public_match_logs:
         type: boolean
       public_results:
+        type: boolean
+      spectate_enabled:
         type: boolean
     type: object
   src_api_matchResults.ReportResultsRequest:
@@ -172,6 +274,13 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  src_api_user.ChangePasswordRequest:
+    properties:
+      current_password:
+        type: string
+      new_password:
+        type: string
     type: object
   src_api_user.GuestRequest:
     properties:
@@ -199,11 +308,17 @@ definitions:
   src_api_user.UpdateUserRequest:
     properties:
       can_create_game:
-        description: |-
-          CanCreateGame is admin-only. Pointer so we can distinguish "field
-          omitted" from "explicit false" — non-admins setting it (either value)
-          gets a 403.
+        description: CanCreateGame is admin-only. Non-admins setting it (either value)
+          get a 403.
         type: boolean
+      email:
+        type: string
+      username:
+        description: |-
+          Username and Email are self-service. Pointers distinguish "omitted"
+          from "explicit empty string" so callers can change one without
+          touching the other.
+        type: string
     type: object
 host: localhost:8080
 info:
@@ -252,6 +367,216 @@ paths:
       summary: Create a game
       tags:
       - Games
+  /game/{gameID}/queue:
+    get:
+      description: Returns all queues for the game in canonical order (oldest first).
+        Public — no auth required. The first element is the default queue used when
+        no queueID is supplied to /match/join, /lobby/host, /user/rating, etc.
+      parameters:
+      - description: Game UUID
+        in: path
+        name: gameID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: queues
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+      summary: List queues for a game
+      tags:
+      - Games
+    post:
+      consumes:
+      - application/json
+      description: Adds a new matchmaking queue under an existing game. Owner-only.
+        Queue names are unique within a game.
+      parameters:
+      - description: Game UUID
+        in: path
+        name: gameID
+        required: true
+        type: string
+      - description: Queue creation payload
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/src_api_game.CreateGameQueueRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_andy98725_elo-service_src_models.GameQueueResp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "409":
+          description: queue name already taken within this game
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+      security:
+      - BearerAuth: []
+      summary: Create a queue under a game
+      tags:
+      - Games
+  /game/{gameID}/queue/{queueID}:
+    delete:
+      description: Deletes a queue. Game-owner only. Refuses to delete the only remaining
+        queue for a game (409). Deleting the current default queue silently promotes
+        the next-oldest to default.
+      parameters:
+      - description: Game UUID
+        in: path
+        name: gameID
+        required: true
+        type: string
+      - description: GameQueue UUID
+        in: path
+        name: queueID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: message
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "409":
+          description: cannot delete the last remaining queue
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+      security:
+      - BearerAuth: []
+      summary: Delete a queue
+      tags:
+      - Games
+    get:
+      description: Returns one queue by ID. Public — no auth required.
+      parameters:
+      - description: Game UUID
+        in: path
+        name: gameID
+        required: true
+        type: string
+      - description: GameQueue UUID
+        in: path
+        name: queueID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_andy98725_elo-service_src_models.GameQueueResp'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+      summary: Get a single queue
+      tags:
+      - Games
+    put:
+      consumes:
+      - application/json
+      description: Updates queue settings. Game-owner only. Conditional update — only
+        non-zero / non-nil fields in the payload are applied.
+      parameters:
+      - description: Game UUID
+        in: path
+        name: gameID
+        required: true
+        type: string
+      - description: GameQueue UUID
+        in: path
+        name: queueID
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_andy98725_elo-service_src_models.UpdateGameQueueParams'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/github_com_andy98725_elo-service_src_models.GameQueueResp'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+      security:
+      - BearerAuth: []
+      summary: Update a queue
+      tags:
+      - Games
   /game/{gameID}/results:
     get:
       description: Returns a paginated list of match results for a specific game
@@ -292,13 +617,18 @@ paths:
       - Results
   /game/{gameId}/leaderboard:
     get:
-      description: Returns the top-rated players for a game, paginated. Ordered by
-        rating descending. Public — no auth required.
+      description: Returns the top-rated players for a game queue, paginated. Ordered
+        by rating descending. Public — no auth required. Defaults to the game's primary
+        queue when queueID is omitted.
       parameters:
       - description: Game UUID
         in: path
         name: gameId
         required: true
+        type: string
+      - description: Specific GameQueue UUID (defaults to primary queue)
+        in: query
+        name: queueID
         type: string
       - description: Page number (default 0)
         in: query
@@ -324,7 +654,7 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/echo.HTTPError'
-      summary: Game leaderboard
+      summary: Game queue leaderboard
       tags:
       - Ratings
   /game/{id}:
@@ -823,6 +1153,77 @@ paths:
       summary: List own server-authored entries
       tags:
       - PlayerData
+  /games/{gameID}/match/me:
+    get:
+      description: Returns every started match in this game that the caller is a participant
+        in. Empty list when none. Used by clients to rediscover the game server after
+        a page reload — the response shape mirrors the matchmaking WebSocket's match_found
+        payload. Guests must preserve their JWT across reloads to use this; a fresh
+        guest token is a new identity and won't match prior participation.
+      parameters:
+      - description: Game UUID
+        in: path
+        name: gameID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: matches
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+      security:
+      - BearerAuth: []
+      summary: List the caller's active matches in a game
+      tags:
+      - Matches
+  /games/{gameID}/matches/live:
+    get:
+      description: Returns every started match in this game that has spectating enabled
+        (game-level flag AND per-match override). Empty list when none. 404 when the
+        game itself does not have spectate_enabled, even if matches exist — the gate
+        is the game's, not the caller's.
+      parameters:
+      - description: Game UUID
+        in: path
+        name: gameID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: matches
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+      security:
+      - BearerAuth: []
+      summary: List spectatable live matches for a game
+      tags:
+      - Matches
   /guest/login:
     post:
       consumes:
@@ -918,6 +1319,11 @@ paths:
         name: gameID
         required: true
         type: string
+      - description: Specific GameQueue UUID. Defaults to the game's primary queue
+          when omitted.
+        in: query
+        name: queueID
+        type: string
       - description: Comma-separated tags advertised to /lobby/find (max 16)
         in: query
         name: tags
@@ -934,6 +1340,12 @@ paths:
           given the lobby ID directly.
         in: query
         name: private
+        type: boolean
+      - description: Per-match override of the game's SpectateEnabled flag. Default
+          true (inherit from game). Set false to disable spectating on this match.
+          Cannot enable spectating on a game where SpectateEnabled is false.
+        in: query
+        name: spectate
         type: boolean
       - description: JWT token (alternative to Authorization header)
         in: query
@@ -1002,6 +1414,56 @@ paths:
       summary: Get a match by ID
       tags:
       - Matches
+  /match/artifact:
+    post:
+      consumes:
+      - application/octet-stream
+      description: 'Game server uploads opaque bytes (replay file, preview image,
+        highlight reel, etc.) for the active match. Auth is the match auth_code carried
+        as Authorization: Bearer <code>. Name must match [a-zA-Z0-9._-]{1,64}; uploading
+        the same name again overwrites. Up to 10 distinct names per match. Body is
+        capped at 1 MiB; Content-Type is preserved and returned on download. The platform
+        doesn''t interpret the bytes — `preview` and `replay` are conventional names
+        that generic UIs may render but no validation is performed on shape.'
+      parameters:
+      - description: Artifact name (a-zA-Z0-9._-, max 64 chars)
+        in: query
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: name, size_bytes, content_type
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: invalid name or too many artifacts
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "403":
+          description: match is not underway
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "413":
+          description: artifact exceeds 1 MiB
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+      security:
+      - BearerAuth: []
+      summary: Upload a named artifact for the active match
+      tags:
+      - Matches
   /match/game/{gameID}:
     get:
       description: Returns a paginated list of matches for a specific game
@@ -1050,8 +1512,13 @@ paths:
         name: gameID
         required: true
         type: string
-      - description: Optional sub-queue key (only honored when game.metadata_enabled=true;
-          capped at 4 KB)
+      - description: Specific GameQueue UUID. Defaults to the game's primary queue
+          (oldest by created_at) when omitted.
+        in: query
+        name: queueID
+        type: string
+      - description: Optional sub-queue key (only honored when the resolved queue's
+          metadata_enabled=true; capped at 4 KB)
         in: query
         name: metadata
         type: string
@@ -1075,7 +1542,12 @@ paths:
         name: gameID
         required: true
         type: string
-      - description: Sub-queue key (only honored when game.metadata_enabled=true)
+      - description: Specific GameQueue UUID. Defaults to the game's primary queue
+          when omitted.
+        in: query
+        name: queueID
+        type: string
+      - description: Sub-queue key (only honored when the resolved queue's metadata_enabled=true)
         in: query
         name: metadata
         type: string
@@ -1137,6 +1609,124 @@ paths:
       summary: List all matches (admin)
       tags:
       - Matches
+  /matches/{matchID}/artifacts:
+    get:
+      description: Returns every artifact uploaded by the game server during this
+        match, with content_type, size_bytes, uploaded_at, and a download url. Auth
+        gate matches the result-visibility rule for the game (PublicResults true →
+        any auth; otherwise participant/owner/admin only).
+      parameters:
+      - description: Match UUID
+        in: path
+        name: matchID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: artifacts
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+      security:
+      - BearerAuth: []
+      summary: List artifacts attached to a match
+      tags:
+      - Matches
+  /matches/{matchID}/artifacts/{name}:
+    get:
+      description: Streams the raw bytes of one named artifact, with the Content-Type
+        the game server uploaded it with. Same auth gate as ListMatchArtifacts.
+      parameters:
+      - description: Match UUID
+        in: path
+        name: matchID
+        required: true
+        type: string
+      - description: Artifact name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: raw artifact bytes
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+      security:
+      - BearerAuth: []
+      summary: Download one artifact's bytes
+      tags:
+      - Matches
+  /matches/{matchID}/stream:
+    get:
+      description: Long-polling proxy over the S3-backed spectator chunks for a match.
+        Pass cursor=0 on first call; the response carries the next cursor in the X-Spectate-Cursor
+        header. Body is the concatenated bytes of chunks [cursor, latest_seq]. When
+        caught up, the request blocks for up to ~30s before returning empty. X-Spectate-EOF=true
+        means the match has ended and no more bytes will arrive — stop polling. Bytes
+        are game-defined; the server treats them as opaque.
+      parameters:
+      - description: Match UUID
+        in: path
+        name: matchID
+        required: true
+        type: string
+      - description: Next chunk seq to fetch (default 0)
+        in: query
+        name: cursor
+        type: integer
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: raw chunk bytes
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+      security:
+      - BearerAuth: []
+      summary: Tail a live spectator stream
+      tags:
+      - Matches
   /result/report:
     post:
       consumes:
@@ -1164,6 +1754,10 @@ paths:
             $ref: '#/definitions/echo.HTTPError'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "409":
+          description: match already ended
           schema:
             $ref: '#/definitions/echo.HTTPError'
         "500":
@@ -1275,13 +1869,30 @@ paths:
       - Results
   /user:
     delete:
-      description: Deletes the authenticated user's account (not yet implemented)
+      description: Soft-deletes the authenticated user. The row stays in the database
+        — match history and ratings keep their FKs intact — but the account can no
+        longer log in and is hidden from listings. Username and email continue to
+        occupy their unique-index slot, so they are NOT released for re-registration.
+        Admins can target another user with `?id=<userID>`.
+      parameters:
+      - description: Target user UUID (admin only)
+        in: query
+        name: id
+        type: string
       responses:
         "200":
-          description: OK
+          description: status
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
       security:
       - BearerAuth: []
-      summary: Delete current user
+      summary: Delete own account (soft delete)
       tags:
       - Users
     get:
@@ -1338,10 +1949,10 @@ paths:
     put:
       consumes:
       - application/json
-      description: |-
-        Updates user fields. Defaults to the authenticated user;
-        admins may target another user with `?id=<userID>`.
-        `can_create_game` is admin-only.
+      description: Updates the authenticated user's username and/or email. Admins
+        may target another user with `?id=<userID>` and may also flip `can_create_game`.
+        Email changes are trusted from the client today; a verification round-trip
+        is planned before any feature relies on email identity.
       parameters:
       - description: Target user UUID (admin only)
         in: query
@@ -1370,6 +1981,10 @@ paths:
             $ref: '#/definitions/echo.HTTPError'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "409":
+          description: username or email already taken
           schema:
             $ref: '#/definitions/echo.HTTPError'
       security:
@@ -1420,6 +2035,51 @@ paths:
       summary: Get match results for a user (admin)
       tags:
       - Results
+  /user/artifacts:
+    get:
+      description: Returns the caller's recent match results that have at least one
+        uploaded artifact. Optional `game_id` filters to a single game; optional repeated
+        `name=` query params filter to results that have at least one of those artifact
+        names. Each match in the response carries its full artifact map (with download
+        URLs) regardless of which names matched the filter.
+      parameters:
+      - description: Restrict to a single game
+        in: query
+        name: game_id
+        type: string
+      - description: 'Repeatable: filter to matches having any of these artifact names'
+        in: query
+        name: name
+        type: string
+      - description: Page number (default 0)
+        in: query
+        name: page
+        type: integer
+      - description: Page size (default 10)
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: matches, next_page
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+      security:
+      - BearerAuth: []
+      summary: List the caller's match artifacts across games
+      tags:
+      - Matches
   /user/game:
     get:
       description: Returns a paginated list of games owned by the authenticated user
@@ -1487,21 +2147,62 @@ paths:
       summary: Log in a user
       tags:
       - Auth
+  /user/password:
+    put:
+      consumes:
+      - application/json
+      description: Rotates the authenticated user's password. Requires the current
+        password — admin impersonation does NOT bypass this check, since impersonation
+        is for support actions, not credential rotation.
+      parameters:
+      - description: current_password, new_password
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/src_api_user.ChangePasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: status
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+        "401":
+          description: current password did not match
+          schema:
+            $ref: '#/definitions/echo.HTTPError'
+      security:
+      - BearerAuth: []
+      summary: Change own password
+      tags:
+      - Users
   /user/rating/{gameId}:
     get:
-      description: Returns the authenticated user's rating for the given game. A row
-        is lazy-created at the game's DefaultRating on first access.
+      description: Returns the authenticated user's rating for the given game's queue.
+        A row is lazy-created at the queue's DefaultRating on first access. Defaults
+        to the game's primary queue when queueID is omitted.
       parameters:
       - description: Game UUID
         in: path
         name: gameId
         required: true
         type: string
+      - description: Specific GameQueue UUID (defaults to primary queue)
+        in: query
+        name: queueID
+        type: string
       produces:
       - application/json
       responses:
         "200":
-          description: player_id, game_id, rating
+          description: player_id, game_queue_id, rating
           schema:
             additionalProperties: true
             type: object
@@ -1519,7 +2220,7 @@ paths:
             $ref: '#/definitions/echo.HTTPError'
       security:
       - BearerAuth: []
-      summary: Get user rating for a game
+      summary: Get user rating for a game queue
       tags:
       - Ratings
   /user/results:

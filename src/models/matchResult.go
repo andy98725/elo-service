@@ -119,13 +119,13 @@ func MatchEnded(matchID string, winnerIDs []string, result string, logsKey strin
 			}
 		}
 
-		if adjustRatings && match.Game.ELOStrategy == ELO_STRATEGY_CLASSIC {
+		if adjustRatings && match.GameQueue.ELOStrategy == ELO_STRATEGY_CLASSIC {
 			playerIDs := make([]string, 0, len(match.Players)+len(match.GuestIDs))
 			for _, p := range match.Players {
 				playerIDs = append(playerIDs, p.ID)
 			}
 			playerIDs = append(playerIDs, []string(match.GuestIDs)...)
-			if err := ApplyClassicElo(tx, &match.Game, playerIDs, winnerIDs); err != nil {
+			if err := ApplyClassicElo(tx, &match.GameQueue, playerIDs, winnerIDs); err != nil {
 				return err
 			}
 		}

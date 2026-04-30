@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/andy98725/elo-service/src/models"
-	"github.com/andy98725/elo-service/src/server"
 	"github.com/andy98725/elo-service/src/util"
 	"github.com/labstack/echo"
 )
@@ -25,21 +24,31 @@ func isUniqueConstraintViolation(err error) bool {
 		strings.Contains(msg, "UNIQUE constraint failed")
 }
 
+// CreateGameRequest is the on-the-wire shape clients submit. It keeps
+// the legacy flat queue fields (lobby_size, matchmaking_machine_name,
+// etc.) so existing integrations don't need code changes — those fields
+// are folded into the auto-created primary queue server-side. Multi-queue
+// callers can omit the queue fields here and create additional queues
+// via /game/:gameID/queue.
 type CreateGameRequest struct {
-	Name                    string  `json:"name"`
-	Description             string  `json:"description"`
-	GuestsAllowed           *bool   `json:"guests_allowed"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	GuestsAllowed   *bool  `json:"guests_allowed"`
+	PublicResults   *bool  `json:"public_results"`
+	PublicMatchLogs *bool  `json:"public_match_logs"`
+	SpectateEnabled *bool  `json:"spectate_enabled"`
+
+	// Primary-queue fields. Persisted on the game's auto-created
+	// "primary" queue. All optional; defaults are applied in CreateGame.
 	LobbyEnabled            *bool   `json:"lobby_enabled"`
 	LobbySize               int     `json:"lobby_size"`
 	MatchmakingStrategy     string  `json:"matchmaking_strategy"`
 	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
 	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
 	ELOStrategy             string  `json:"elo_strategy"`
+	DefaultRating           int     `json:"default_rating"`
 	KFactor                 int     `json:"k_factor"`
-	MetadataEnabled         bool    `json:"metadata_enabled"`
-	PublicResults           *bool   `json:"public_results"`
-	PublicMatchLogs         *bool   `json:"public_match_logs"`
-	SpectateEnabled         *bool   `json:"spectate_enabled"`
+	MetadataEnabled         *bool   `json:"metadata_enabled"`
 }
 
 // CreateGame godoc
@@ -69,20 +78,23 @@ func CreateGame(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "user is not allowed to create games")
 	}
 	game, err := models.CreateGame(models.CreateGameParams{
-		Name:                    req.Name,
-		Description:             req.Description,
-		GuestsAllowed:           req.GuestsAllowed,
-		LobbyEnabled:            req.LobbyEnabled,
-		LobbySize:               req.LobbySize,
-		MatchmakingStrategy:     req.MatchmakingStrategy,
-		MatchmakingMachineName:  req.MatchmakingMachineName,
-		MatchmakingMachinePorts: req.MatchmakingMachinePorts,
-		ELOStrategy:             req.ELOStrategy,
-		KFactor:                 req.KFactor,
-		MetadataEnabled:         req.MetadataEnabled,
-		PublicResults:           req.PublicResults,
-		PublicMatchLogs:         req.PublicMatchLogs,
-		SpectateEnabled:         req.SpectateEnabled,
+		Name:            req.Name,
+		Description:     req.Description,
+		GuestsAllowed:   req.GuestsAllowed,
+		PublicResults:   req.PublicResults,
+		PublicMatchLogs: req.PublicMatchLogs,
+		SpectateEnabled: req.SpectateEnabled,
+		PrimaryQueue: models.CreateGameQueueParams{
+			LobbyEnabled:            req.LobbyEnabled,
+			LobbySize:               req.LobbySize,
+			MatchmakingStrategy:     req.MatchmakingStrategy,
+			MatchmakingMachineName:  req.MatchmakingMachineName,
+			MatchmakingMachinePorts: req.MatchmakingMachinePorts,
+			ELOStrategy:             req.ELOStrategy,
+			DefaultRating:           req.DefaultRating,
+			KFactor:                 req.KFactor,
+			MetadataEnabled:         req.MetadataEnabled,
+		},
 	}, *user)
 	if err != nil {
 		if isUniqueConstraintViolation(err) {
@@ -149,9 +161,8 @@ func GetGame(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Game ID is required")
 	}
 
-	var game models.Game
-	result := server.S.DB.First(&game, "id = ?", id)
-	if result.Error != nil {
+	game, err := models.GetGame(id)
+	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "Game not found")
 	}
 

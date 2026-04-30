@@ -303,17 +303,20 @@ Content-Type: application/json
   "name":                       "TicTacToe",
   "description":                "2-player tic tac toe",
   "guests_allowed":             true,
+  "public_results":             true,
+  "public_match_logs":          false,
+
   "lobby_enabled":              true,
   "lobby_size":                 2,
   "matchmaking_strategy":       "random",
   "matchmaking_machine_name":   "your-dockerhub-user/your-image:latest",
   "matchmaking_machine_ports":  [8080],
   "elo_strategy":               "unranked",
-  "metadata_enabled":           false,
-  "public_results":             true,
-  "public_match_logs":          false
+  "metadata_enabled":           false
 }
 ```
+
+The matchmaking fields (the second block) seed an auto-created **primary queue** under the new game — see "Queues" below. The flat-fields shape on `POST /game` and `PUT /game/{id}` is preserved for backwards compatibility; updates apply to the game's primary queue. Multi-queue games address each queue directly via `/game/{id}/queue/{queueID}`.
 
 Field reference:
 
@@ -321,20 +324,44 @@ Field reference:
 |---|---|---|---|
 | `name` | yes | — | Globally unique. `409` if taken. |
 | `description` | no | `""` | User-facing. |
-| `matchmaking_machine_name` | no | `docker.io/andy98725/example-server:latest` | Full Docker image ref (`registry/repo:tag`). The host VM must be able to `docker pull` it — public images on Docker Hub work; private registries need credentials configured on the host VM image. **Almost always set this**: omitting it silently falls back to the demo example-server, which is rarely what you want for a real game. |
-| `matchmaking_machine_ports` | no | `[]` | The ports your container listens on. Order is preserved in the client `server_ports` array. |
-| `lobby_size` | no | `2` | Players per match. Matchmaker waits for this many before spawning. |
-| `lobby_enabled` | no | `true` | Whether the lobby flow (`/lobby/*`) is allowed for this game. |
 | `guests_allowed` | no | `true` | If `false`, only registered users can queue. |
-| `matchmaking_strategy` | no | `"random"` | `"random"` or `"rating"`. Affects who pairs with whom in the queue. |
-| `elo_strategy` | no | `"unranked"` | `"unranked"` (no rating updates) or `"classic"` (Elo). |
-| `metadata_enabled` | no | `false` | If `true`, the `metadata` query param on `/match/join` segments the queue (e.g., by region or game mode). |
 | `public_results` | no | `true` | If `true`, anyone can see match results for this game; if `false`, only participants and the game owner. |
 | `public_match_logs` | no | `false` | If `true`, anyone with a result can download container logs; if `false`, only the game owner. |
+| `matchmaking_machine_name` | no | `docker.io/andy98725/example-server:latest` | Primary queue field. Full Docker image ref (`registry/repo:tag`). The host VM must be able to `docker pull` it — public images on Docker Hub work; private registries need credentials configured on the host VM image. **Almost always set this**: omitting it silently falls back to the demo example-server, which is rarely what you want for a real game. |
+| `matchmaking_machine_ports` | no | `[]` | Primary queue field. Ports your container listens on. Order is preserved in the client `server_ports` array. |
+| `lobby_size` | no | `2` | Primary queue field. Players per match — matchmaker waits for this many before spawning. |
+| `lobby_enabled` | no | `true` | Primary queue field. Whether the lobby flow (`/lobby/*`) is allowed for this queue. |
+| `matchmaking_strategy` | no | `"random"` | Primary queue field. `"random"` or `"rating"`. Affects who pairs with whom in the queue. |
+| `elo_strategy` | no | `"unranked"` | Primary queue field. `"unranked"` (no rating updates) or `"classic"` (Elo). |
+| `default_rating` | no | `1000` | Primary queue field. Initial rating assigned the first time a player is rated in this queue. |
+| `k_factor` | no | `32` | Primary queue field. Elo K factor (only used when `elo_strategy="classic"`). |
+| `metadata_enabled` | no | `false` | Primary queue field. If `true`, the `metadata` query param on `/match/join` segments the queue (e.g., by region or game mode). |
 
-Response `200`: a `GameResp` with the new `id` (UUID). That UUID is the `gameID` your clients pass to `/match/join`.
+Response `200`: a `GameResp` with the new `id` (UUID), a `queues` array (one entry: the primary queue), and the legacy flat fields mirrored from `queues[0]` for backwards compatibility.
 
-Update with `PUT /game/{id}` (only the owner). Delete with `DELETE /game/{id}`.
+Update with `PUT /game/{id}` (only the owner). Delete with `DELETE /game/{id}` — cascades to all queues, ratings, and per-game player data.
+
+### Queues
+
+A `Game` is identity + game-wide policy (name, owner, public-results flag). The matchmaking-flavored knobs (image, ports, lobby size, ELO strategy) live on **`GameQueue` records** — one game has 1..N queues. Use cases:
+
+- **Different game modes** under one game: `1v1-ranked`, `2v2-ranked`, `casual`. Each maintains its own ladder (rating rows are keyed by `(player, game_queue)`).
+- **Different images** for the same game: a stable build vs. a beta build, with players choosing which queue to enter.
+- **Different ELO settings**: a high-K-factor "fast track" queue alongside a low-K-factor "stable" queue.
+
+The "primary" queue is created automatically by `POST /game` from the legacy flat fields. The default queue (used when API callers don't specify a `queueID`) is the **oldest queue** by `created_at` — typically the primary, unless you've deleted it (in which case the next-oldest auto-promotes).
+
+Endpoints:
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `POST`   | `/game/{gameID}/queue` | owner only | Add a queue. Body matches the matchmaking-fields shape on `POST /game`, plus a `name` (unique within the game). |
+| `GET`    | `/game/{gameID}/queue` | public | List all queues for a game in canonical order (oldest first; `[0]` is the default). |
+| `GET`    | `/game/{gameID}/queue/{queueID}` | public | Fetch one queue. |
+| `PUT`    | `/game/{gameID}/queue/{queueID}` | owner only | Update queue settings (conditional update — only non-zero fields are applied). |
+| `DELETE` | `/game/{gameID}/queue/{queueID}` | owner only | Delete a queue. Returns `409` if it's the only remaining queue for the game. Cascades to its ratings. |
+
+The matchmaking, lobby, and rating endpoints all accept an optional `queueID` query param. Omit it and they default to the game's primary queue — existing single-queue clients keep working without code changes.
 
 ---
 
@@ -444,9 +471,14 @@ You don't need to expose a `/health` endpoint of your own (though `example-game-
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | `POST` | `/result/report` | per-match token in body | Report match outcome |
-| `POST` | `/game` | user | Register a new game |
-| `PUT`  | `/game/{id}` | game owner | Update game config |
-| `DELETE` | `/game/{id}` | game owner | Delete a game |
+| `POST` | `/game` | user | Register a new game (creates game + primary queue in one call) |
+| `PUT`  | `/game/{id}` | game owner | Update game-level fields; flat queue fields apply to the primary queue |
+| `DELETE` | `/game/{id}` | game owner | Delete a game (cascades to queues, ratings, player data) |
+| `POST` | `/game/{gameID}/queue` | game owner | Create an additional queue (image, ports, ELO settings, etc.) |
+| `GET`  | `/game/{gameID}/queue` | public | List all queues for a game (oldest first; `[0]` is the default) |
+| `GET`  | `/game/{gameID}/queue/{queueID}` | public | Fetch one queue |
+| `PUT`  | `/game/{gameID}/queue/{queueID}` | game owner | Update a queue's matchmaking config |
+| `DELETE` | `/game/{gameID}/queue/{queueID}` | game owner | Delete a queue (refused with `409` if it's the last one) |
 | `GET`  | `/results/{matchID}/logs` | user/guest | Download container stdout (if public) |
 | `GET`  | `/games/{gameID}/data/{playerID}/player` | match token | Read player-authored entries |
 | `GET`  | `/games/{gameID}/data/{playerID}/server` | match token | Read server-authored entries |

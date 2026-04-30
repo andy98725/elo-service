@@ -36,6 +36,7 @@ var upgrader = websocket.Upgrader{
 // @Tags         Lobby
 // @Security     BearerAuth
 // @Param        gameID   query string true  "Game UUID"
+// @Param        queueID  query string false "Specific GameQueue UUID. Defaults to the game's primary queue when omitted."
 // @Param        tags     query string false "Comma-separated tags advertised to /lobby/find (max 16)"
 // @Param        metadata query string false "Opaque metadata stored on the lobby record"
 // @Param        password query string false "Optional password; joiners must supply the same value to enter"
@@ -57,14 +58,20 @@ func HostLobby(ctx echo.Context) error {
 		conn.WriteJSON(echo.Map{"status": "error", "error": "gameID is required"})
 		return nil
 	}
+	queueIDParam := ctx.QueryParam("queueID")
 
 	game, err := models.GetGame(gameID)
 	if err != nil {
 		conn.WriteJSON(echo.Map{"status": "error", "error": "game not found"})
 		return nil
 	}
-	if !game.LobbyEnabled {
-		conn.WriteJSON(echo.Map{"status": "error", "error": "lobbies are disabled for this game"})
+	queue, err := models.ResolveQueue(gameID, queueIDParam)
+	if err != nil {
+		conn.WriteJSON(echo.Map{"status": "error", "error": "queue not found: " + err.Error()})
+		return nil
+	}
+	if !queue.LobbyEnabled {
+		conn.WriteJSON(echo.Map{"status": "error", "error": "lobbies are disabled for this queue"})
 		return nil
 	}
 
@@ -102,11 +109,12 @@ func HostLobby(ctx echo.Context) error {
 	rec := &redis.LobbyRecord{
 		ID:           uuid.New().String(),
 		GameID:       gameID,
+		GameQueueID:  queue.ID,
 		HostID:       id,
 		HostName:     name,
 		Tags:         parseTags(ctx.QueryParam("tags")),
 		Metadata:     ctx.QueryParam("metadata"),
-		MaxPlayers:   game.LobbySize,
+		MaxPlayers:   queue.LobbySize,
 		CreatedAt:    time.Now().UTC(),
 		PasswordHash: passwordHash,
 		Private:      private,
@@ -142,7 +150,7 @@ func HostLobby(ctx echo.Context) error {
 		"private":     rec.Private,
 	})
 
-	runLobbySession(ctx, conn, rec, game, id, name, true, subs)
+	runLobbySession(ctx, conn, rec, game, queue, id, name, true, subs)
 
 	// Host departure tears down the lobby (unless /start already deleted it).
 	server.S.Redis.RemoveLobbyPlayer(context.Background(), rec.ID, id)
@@ -187,6 +195,11 @@ func JoinLobby(ctx echo.Context) error {
 		conn.WriteJSON(echo.Map{"status": "error", "error": "game not found"})
 		return nil
 	}
+	queue, err := models.ResolveQueue(rec.GameID, rec.GameQueueID)
+	if err != nil {
+		conn.WriteJSON(echo.Map{"status": "error", "error": "queue not found: " + err.Error()})
+		return nil
+	}
 
 	// Password gate runs before the capacity Lua so failed attempts don't
 	// touch the player set. Single error message for missing/wrong password
@@ -229,7 +242,7 @@ func JoinLobby(ctx echo.Context) error {
 		"players":     len(players),
 	})
 
-	runLobbySession(ctx, conn, rec, game, id, name, false, subs)
+	runLobbySession(ctx, conn, rec, game, queue, id, name, false, subs)
 
 	server.S.Redis.RemoveLobbyPlayer(context.Background(), lobbyID, id)
 	server.S.Redis.PublishLobbyEvent(context.Background(), lobbyID,
@@ -250,7 +263,7 @@ type lobbySubs struct {
 func openLobbySubs(ctx context.Context, rec *redis.LobbyRecord, playerID string) *lobbySubs {
 	return &lobbySubs{
 		events: server.S.Redis.WatchLobbyEvents(ctx, rec.ID),
-		match:  server.S.Redis.WatchMatchReady(ctx, rec.GameID, playerID),
+		match:  server.S.Redis.WatchMatchReady(ctx, rec.GameQueueID, playerID),
 		kick:   server.S.Redis.WatchLobbyKick(ctx, rec.ID, playerID),
 	}
 }
@@ -263,6 +276,7 @@ func runLobbySession(
 	conn *websocket.Conn,
 	rec *redis.LobbyRecord,
 	game *models.Game,
+	queue *models.GameQueue,
 	playerID, playerName string,
 	isHost bool,
 	subs *lobbySubs,
@@ -324,7 +338,7 @@ func runLobbySession(
 			if text == "" {
 				continue
 			}
-			if handleInbound(reqCtx, rec, game, playerID, playerName, isHost, text) {
+			if handleInbound(reqCtx, rec, game, queue, playerID, playerName, isHost, text) {
 				conn.WriteJSON(echo.Map{"status": "disconnected"})
 				return
 			}
@@ -346,6 +360,7 @@ func handleInbound(
 	ctx context.Context,
 	rec *redis.LobbyRecord,
 	game *models.Game,
+	queue *models.GameQueue,
 	playerID, playerName string,
 	isHost bool,
 	text string,
@@ -354,7 +369,7 @@ func handleInbound(
 		return true
 	}
 	if isHost && strings.HasPrefix(text, "/") {
-		runHostCommand(ctx, rec, game, text)
+		runHostCommand(ctx, rec, game, queue, text)
 		return false
 	}
 	server.S.Redis.PublishLobbyEvent(ctx, rec.ID, mustJSON(lobbyEvent{
@@ -366,7 +381,7 @@ func handleInbound(
 	return false
 }
 
-func runHostCommand(ctx context.Context, rec *redis.LobbyRecord, game *models.Game, text string) {
+func runHostCommand(ctx context.Context, rec *redis.LobbyRecord, game *models.Game, queue *models.GameQueue, text string) {
 	parts := strings.SplitN(strings.TrimSpace(text), " ", 2)
 	cmd := parts[0]
 	switch cmd {
@@ -405,7 +420,10 @@ func runHostCommand(ctx context.Context, rec *redis.LobbyRecord, game *models.Ga
 		server.S.Redis.PublishLobbyEvent(ctx, rec.ID, mustJSON(lobbyEvent{Event: "lobby_starting"}))
 		// Pass the lobby's spectate flag as a disable-only override.
 		spectateOverride := rec.Spectate
-		if err := matchmaking.StartMatch(ctx, rec.GameID, game, ids, &spectateOverride); err != nil {
+		// Lobby flow doesn't go through the queue list — it dispatches
+		// directly to StartMatch with the resolved queue. The composite
+		// arg is just queue.ID (no metadata segmentation in lobby flow).
+		if err := matchmaking.StartMatch(ctx, game, queue, queue.ID, ids, &spectateOverride); err != nil {
 			slog.Error("Failed to start match from lobby", "error", err, "lobbyID", rec.ID)
 			server.S.Redis.PublishLobbyEvent(ctx, rec.ID, mustJSON(lobbyEvent{
 				Event:   "player_say",

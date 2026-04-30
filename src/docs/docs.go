@@ -78,6 +78,317 @@ const docTemplate = `{
                 }
             }
         },
+        "/game/{gameID}/queue": {
+            "get": {
+                "description": "Returns all queues for the game in canonical order (oldest first). Public — no auth required. The first element is the default queue used when no queueID is supplied to /match/join, /lobby/host, /user/rating, etc.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Games"
+                ],
+                "summary": "List queues for a game",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Game UUID",
+                        "name": "gameID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "queues",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Adds a new matchmaking queue under an existing game. Owner-only. Queue names are unique within a game.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Games"
+                ],
+                "summary": "Create a queue under a game",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Game UUID",
+                        "name": "gameID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Queue creation payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/src_api_game.CreateGameQueueRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_andy98725_elo-service_src_models.GameQueueResp"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "409": {
+                        "description": "queue name already taken within this game",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
+            }
+        },
+        "/game/{gameID}/queue/{queueID}": {
+            "get": {
+                "description": "Returns one queue by ID. Public — no auth required.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Games"
+                ],
+                "summary": "Get a single queue",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Game UUID",
+                        "name": "gameID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "GameQueue UUID",
+                        "name": "queueID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_andy98725_elo-service_src_models.GameQueueResp"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Updates queue settings. Game-owner only. Conditional update — only non-zero / non-nil fields in the payload are applied.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Games"
+                ],
+                "summary": "Update a queue",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Game UUID",
+                        "name": "gameID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "GameQueue UUID",
+                        "name": "queueID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_andy98725_elo-service_src_models.UpdateGameQueueParams"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_andy98725_elo-service_src_models.GameQueueResp"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Deletes a queue. Game-owner only. Refuses to delete the only remaining queue for a game (409). Deleting the current default queue silently promotes the next-oldest to default.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Games"
+                ],
+                "summary": "Delete a queue",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Game UUID",
+                        "name": "gameID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "GameQueue UUID",
+                        "name": "queueID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "message",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "409": {
+                        "description": "cannot delete the last remaining queue",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
+            }
+        },
         "/game/{gameID}/results": {
             "get": {
                 "security": [
@@ -139,14 +450,14 @@ const docTemplate = `{
         },
         "/game/{gameId}/leaderboard": {
             "get": {
-                "description": "Returns the top-rated players for a game, paginated. Ordered by rating descending. Public — no auth required.",
+                "description": "Returns the top-rated players for a game queue, paginated. Ordered by rating descending. Public — no auth required. Defaults to the game's primary queue when queueID is omitted.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Ratings"
                 ],
-                "summary": "Game leaderboard",
+                "summary": "Game queue leaderboard",
                 "parameters": [
                     {
                         "type": "string",
@@ -154,6 +465,12 @@ const docTemplate = `{
                         "name": "gameId",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Specific GameQueue UUID (defaults to primary queue)",
+                        "name": "queueID",
+                        "in": "query"
                     },
                     {
                         "type": "integer",
@@ -929,6 +1246,106 @@ const docTemplate = `{
                 }
             }
         },
+        "/games/{gameID}/match/me": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns every started match in this game that the caller is a participant in. Empty list when none. Used by clients to rediscover the game server after a page reload — the response shape mirrors the matchmaking WebSocket's match_found payload. Guests must preserve their JWT across reloads to use this; a fresh guest token is a new identity and won't match prior participation.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Matches"
+                ],
+                "summary": "List the caller's active matches in a game",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Game UUID",
+                        "name": "gameID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "matches",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
+            }
+        },
+        "/games/{gameID}/matches/live": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns every started match in this game that has spectating enabled (game-level flag AND per-match override). Empty list when none. 404 when the game itself does not have spectate_enabled, even if matches exist — the gate is the game's, not the caller's.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Matches"
+                ],
+                "summary": "List spectatable live matches for a game",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Game UUID",
+                        "name": "gameID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "matches",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
+            }
+        },
         "/guest/login": {
             "post": {
                 "description": "Returns a JWT token for a guest user with the given display name",
@@ -1076,6 +1493,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "Specific GameQueue UUID. Defaults to the game's primary queue when omitted.",
+                        "name": "queueID",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "Comma-separated tags advertised to /lobby/find (max 16)",
                         "name": "tags",
                         "in": "query"
@@ -1096,6 +1519,12 @@ const docTemplate = `{
                         "type": "boolean",
                         "description": "When true, lobby is excluded from /lobby/find. Joiners must be given the lobby ID directly.",
                         "name": "private",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Per-match override of the game's SpectateEnabled flag. Default true (inherit from game). Set false to disable spectating on this match. Cannot enable spectating on a game where SpectateEnabled is false.",
+                        "name": "spectate",
                         "in": "query"
                     },
                     {
@@ -1142,6 +1571,74 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {}
+            }
+        },
+        "/match/artifact": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Game server uploads opaque bytes (replay file, preview image, highlight reel, etc.) for the active match. Auth is the match auth_code carried as Authorization: Bearer \u003ccode\u003e. Name must match [a-zA-Z0-9._-]{1,64}; uploading the same name again overwrites. Up to 10 distinct names per match. Body is capped at 1 MiB; Content-Type is preserved and returned on download. The platform doesn't interpret the bytes — ` + "`" + `preview` + "`" + ` and ` + "`" + `replay` + "`" + ` are conventional names that generic UIs may render but no validation is performed on shape.",
+                "consumes": [
+                    "application/octet-stream"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Matches"
+                ],
+                "summary": "Upload a named artifact for the active match",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Artifact name (a-zA-Z0-9._-, max 64 chars)",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "name, size_bytes, content_type",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "invalid name or too many artifacts",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "403": {
+                        "description": "match is not underway",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "413": {
+                        "description": "artifact exceeds 1 MiB",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
             }
         },
         "/match/game/{gameID}": {
@@ -1225,7 +1722,13 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Optional sub-queue key (only honored when game.metadata_enabled=true; capped at 4 KB)",
+                        "description": "Specific GameQueue UUID. Defaults to the game's primary queue (oldest by created_at) when omitted.",
+                        "name": "queueID",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional sub-queue key (only honored when the resolved queue's metadata_enabled=true; capped at 4 KB)",
                         "name": "metadata",
                         "in": "query"
                     },
@@ -1264,7 +1767,13 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Sub-queue key (only honored when game.metadata_enabled=true)",
+                        "description": "Specific GameQueue UUID. Defaults to the game's primary queue when omitted.",
+                        "name": "queueID",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sub-queue key (only honored when the resolved queue's metadata_enabled=true)",
                         "name": "metadata",
                         "in": "query"
                     }
@@ -1396,6 +1905,176 @@ const docTemplate = `{
                 }
             }
         },
+        "/matches/{matchID}/artifacts": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns every artifact uploaded by the game server during this match, with content_type, size_bytes, uploaded_at, and a download url. Auth gate matches the result-visibility rule for the game (PublicResults true → any auth; otherwise participant/owner/admin only).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Matches"
+                ],
+                "summary": "List artifacts attached to a match",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Match UUID",
+                        "name": "matchID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "artifacts",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
+            }
+        },
+        "/matches/{matchID}/artifacts/{name}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Streams the raw bytes of one named artifact, with the Content-Type the game server uploaded it with. Same auth gate as ListMatchArtifacts.",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "Matches"
+                ],
+                "summary": "Download one artifact's bytes",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Match UUID",
+                        "name": "matchID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Artifact name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "raw artifact bytes",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
+            }
+        },
+        "/matches/{matchID}/stream": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Long-polling proxy over the S3-backed spectator chunks for a match. Pass cursor=0 on first call; the response carries the next cursor in the X-Spectate-Cursor header. Body is the concatenated bytes of chunks [cursor, latest_seq]. When caught up, the request blocks for up to ~30s before returning empty. X-Spectate-EOF=true means the match has ended and no more bytes will arrive — stop polling. Bytes are game-defined; the server treats them as opaque.",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "Matches"
+                ],
+                "summary": "Tail a live spectator stream",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Match UUID",
+                        "name": "matchID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Next chunk seq to fetch (default 0)",
+                        "name": "cursor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "raw chunk bytes",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
+            }
+        },
         "/result/report": {
             "post": {
                 "description": "Called by the game server to report the outcome of a match",
@@ -1438,6 +2117,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "409": {
+                        "description": "match already ended",
                         "schema": {
                             "$ref": "#/definitions/echo.HTTPError"
                         }
@@ -1643,7 +2328,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Updates user fields. Defaults to the authenticated user;\nadmins may target another user with ` + "`" + `?id=\u003cuserID\u003e` + "`" + `.\n` + "`" + `can_create_game` + "`" + ` is admin-only.",
+                "description": "Updates the authenticated user's username and/or email. Admins may target another user with ` + "`" + `?id=\u003cuserID\u003e` + "`" + ` and may also flip ` + "`" + `can_create_game` + "`" + `. Email changes are trusted from the client today; a verification round-trip is planned before any feature relies on email identity.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1692,6 +2377,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "409": {
+                        "description": "username or email already taken",
                         "schema": {
                             "$ref": "#/definitions/echo.HTTPError"
                         }
@@ -1754,14 +2445,98 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Deletes the authenticated user's account (not yet implemented)",
+                "description": "Soft-deletes the authenticated user. The row stays in the database — match history and ratings keep their FKs intact — but the account can no longer log in and is hidden from listings. Username and email continue to occupy their unique-index slot, so they are NOT released for re-registration. Admins can target another user with ` + "`" + `?id=\u003cuserID\u003e` + "`" + `.",
                 "tags": [
                     "Users"
                 ],
-                "summary": "Delete current user",
+                "summary": "Delete own account (soft delete)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Target user UUID (admin only)",
+                        "name": "id",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "OK"
+                        "description": "status",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
+            }
+        },
+        "/user/artifacts": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the caller's recent match results that have at least one uploaded artifact. Optional ` + "`" + `game_id` + "`" + ` filters to a single game; optional repeated ` + "`" + `name=` + "`" + ` query params filter to results that have at least one of those artifact names. Each match in the response carries its full artifact map (with download URLs) regardless of which names matched the filter.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Matches"
+                ],
+                "summary": "List the caller's match artifacts across games",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Restrict to a single game",
+                        "name": "game_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Repeatable: filter to matches having any of these artifact names",
+                        "name": "name",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (default 0)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 10)",
+                        "name": "pageSize",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "matches, next_page",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
                     }
                 }
             }
@@ -1869,6 +2644,60 @@ const docTemplate = `{
                 }
             }
         },
+        "/user/password": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Rotates the authenticated user's password. Requires the current password — admin impersonation does NOT bypass this check, since impersonation is for support actions, not credential rotation.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Change own password",
+                "parameters": [
+                    {
+                        "description": "current_password, new_password",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/src_api_user.ChangePasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "status",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    },
+                    "401": {
+                        "description": "current password did not match",
+                        "schema": {
+                            "$ref": "#/definitions/echo.HTTPError"
+                        }
+                    }
+                }
+            }
+        },
         "/user/rating/{gameId}": {
             "get": {
                 "security": [
@@ -1876,14 +2705,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns the authenticated user's rating for the given game. A row is lazy-created at the game's DefaultRating on first access.",
+                "description": "Returns the authenticated user's rating for the given game's queue. A row is lazy-created at the queue's DefaultRating on first access. Defaults to the game's primary queue when queueID is omitted.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Ratings"
                 ],
-                "summary": "Get user rating for a game",
+                "summary": "Get user rating for a game queue",
                 "parameters": [
                     {
                         "type": "string",
@@ -1891,11 +2720,17 @@ const docTemplate = `{
                         "name": "gameId",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Specific GameQueue UUID (defaults to primary queue)",
+                        "name": "queueID",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "player_id, game_id, rating",
+                        "description": "player_id, game_queue_id, rating",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -2111,17 +2946,17 @@ const docTemplate = `{
                 "message": {}
             }
         },
-        "github_com_andy98725_elo-service_src_models.GameResp": {
+        "github_com_andy98725_elo-service_src_models.GameQueueResp": {
             "type": "object",
             "properties": {
-                "description": {
-                    "type": "string"
+                "default_rating": {
+                    "type": "integer"
                 },
                 "elo_strategy": {
                     "type": "string"
                 },
-                "guests_allowed": {
-                    "type": "boolean"
+                "game_id": {
+                    "type": "string"
                 },
                 "id": {
                     "type": "string"
@@ -2152,6 +2987,54 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "github_com_andy98725_elo-service_src_models.GameResp": {
+            "type": "object",
+            "properties": {
+                "default_rating": {
+                    "type": "integer"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "elo_strategy": {
+                    "type": "string"
+                },
+                "guests_allowed": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "k_factor": {
+                    "type": "integer"
+                },
+                "lobby_enabled": {
+                    "description": "Legacy flat queue fields, mirrored from Queues[0]. Empty/zero\nwhen the game has no queues (transient state during creation).",
+                    "type": "boolean"
+                },
+                "lobby_size": {
+                    "type": "integer"
+                },
+                "matchmaking_machine_name": {
+                    "type": "string"
+                },
+                "matchmaking_machine_ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "matchmaking_strategy": {
+                    "type": "string"
+                },
+                "metadata_enabled": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
                 },
                 "owner": {
                     "$ref": "#/definitions/github_com_andy98725_elo-service_src_models.UserResp"
@@ -2160,6 +3043,15 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "public_results": {
+                    "type": "boolean"
+                },
+                "queues": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_andy98725_elo-service_src_models.GameQueueResp"
+                    }
+                },
+                "spectate_enabled": {
                     "type": "boolean"
                 }
             }
@@ -2241,6 +3133,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "lobby_enabled": {
+                    "description": "Legacy flat queue fields. Applied to the game's default queue.\nMulti-queue clients should hit /game/:id/queue/:queueID directly.",
                     "type": "boolean"
                 },
                 "lobby_size": {
@@ -2269,40 +3162,20 @@ const docTemplate = `{
                 },
                 "public_results": {
                     "type": "boolean"
+                },
+                "spectate_enabled": {
+                    "type": "boolean"
                 }
             }
         },
-        "github_com_andy98725_elo-service_src_models.UserResp": {
+        "github_com_andy98725_elo-service_src_models.UpdateGameQueueParams": {
             "type": "object",
             "properties": {
-                "can_create_game": {
-                    "type": "boolean"
-                },
-                "email": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "is_admin": {
-                    "type": "boolean"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "src_api_game.CreateGameRequest": {
-            "type": "object",
-            "properties": {
-                "description": {
-                    "type": "string"
+                "default_rating": {
+                    "type": "integer"
                 },
                 "elo_strategy": {
                     "type": "string"
-                },
-                "guests_allowed": {
-                    "type": "boolean"
                 },
                 "k_factor": {
                     "type": "integer"
@@ -2330,11 +3203,117 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "github_com_andy98725_elo-service_src_models.UserResp": {
+            "type": "object",
+            "properties": {
+                "can_create_game": {
+                    "type": "boolean"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_admin": {
+                    "type": "boolean"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "src_api_game.CreateGameQueueRequest": {
+            "type": "object",
+            "properties": {
+                "default_rating": {
+                    "type": "integer"
+                },
+                "elo_strategy": {
+                    "type": "string"
+                },
+                "k_factor": {
+                    "type": "integer"
+                },
+                "lobby_enabled": {
+                    "type": "boolean"
+                },
+                "lobby_size": {
+                    "type": "integer"
+                },
+                "matchmaking_machine_name": {
+                    "type": "string"
+                },
+                "matchmaking_machine_ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "matchmaking_strategy": {
+                    "type": "string"
+                },
+                "metadata_enabled": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "src_api_game.CreateGameRequest": {
+            "type": "object",
+            "properties": {
+                "default_rating": {
+                    "type": "integer"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "elo_strategy": {
+                    "type": "string"
+                },
+                "guests_allowed": {
+                    "type": "boolean"
+                },
+                "k_factor": {
+                    "type": "integer"
+                },
+                "lobby_enabled": {
+                    "description": "Primary-queue fields. Persisted on the game's auto-created\n\"primary\" queue. All optional; defaults are applied in CreateGame.",
+                    "type": "boolean"
+                },
+                "lobby_size": {
+                    "type": "integer"
+                },
+                "matchmaking_machine_name": {
+                    "type": "string"
+                },
+                "matchmaking_machine_ports": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "matchmaking_strategy": {
+                    "type": "string"
+                },
+                "metadata_enabled": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
                 },
                 "public_match_logs": {
                     "type": "boolean"
                 },
                 "public_results": {
+                    "type": "boolean"
+                },
+                "spectate_enabled": {
                     "type": "boolean"
                 }
             }
@@ -2359,6 +3338,17 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "src_api_user.ChangePasswordRequest": {
+            "type": "object",
+            "properties": {
+                "current_password": {
+                    "type": "string"
+                },
+                "new_password": {
+                    "type": "string"
                 }
             }
         },
@@ -2402,8 +3392,15 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "can_create_game": {
-                    "description": "CanCreateGame is admin-only. Pointer so we can distinguish \"field\nomitted\" from \"explicit false\" — non-admins setting it (either value)\ngets a 403.",
+                    "description": "CanCreateGame is admin-only. Non-admins setting it (either value) get a 403.",
                     "type": "boolean"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "username": {
+                    "description": "Username and Email are self-service. Pointers distinguish \"omitted\"\nfrom \"explicit empty string\" so callers can change one without\ntouching the other.",
+                    "type": "string"
                 }
             }
         }
