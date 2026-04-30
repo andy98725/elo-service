@@ -104,7 +104,9 @@ Content-Type: application/json
 - `winner_ids` is a list. For single-winner games you can use the legacy `winner_id` (string) field instead — the server normalizes it to a one-element list. An empty array is allowed (draw / abort).
 - `reason` is a free-form string; convention is `"completed"` for normal endings, `"timeout"` if you ended early, anything else is fine for your own bookkeeping.
 
-There is **no Authorization header** on this endpoint — the per-match `token_id` *is* the credential. A successful report ends the match and deletes the underlying `Match` row; the token will not resolve again, so a second report returns `404 Match not found`. It's safe to retry on network failure, but treat any 2xx as terminal.
+There is **no Authorization header** on this endpoint — the per-match `token_id` *is* the credential. A successful report ends the match and writes the `MatchResult`; the result itself is immutable, so a second report returns `409 Conflict — match already ended`. It's safe to retry on network failure, but treat any 2xx as terminal.
+
+> **Post-result cooldown.** After a successful 2xx, your container and `token_id` stay alive for a grace window (default **5 minutes**, controlled by `MATCH_COOLDOWN_DURATION` on the matchmaker). During the window you can still call `POST /match/artifact` and the server-authored `/games/{gameID}/data/{playerID}/...` endpoints — useful when artifact uploads or final stat writes happen async after you decide the result. Calling `/result/report` again is rejected. After the window, the worker stops your container and invalidates the token; further calls get `401`. Don't assume any specific moment within the window for shutdown — exit cleanly whenever your post-match work is done.
 
 > **Where does the URL come from?** The matchmaker does **not** inject any environment variables into your container, so the reporting URL has to come from somewhere you control. Two common patterns:
 >
@@ -116,7 +118,7 @@ There is **no Authorization header** on this endpoint — the per-match `token_i
 >     ```
 >    Then your code reads `os.Getenv("WEBSITE_URL")`. Override at build time with `--build-arg WEBSITE_URL=...`. `https://elomm.net/result/report` and `https://elo-service.fly.dev/result/report` both reach the same backend.
 
-After a successful POST, the host agent will stop and remove your container shortly. Exit cleanly after reporting.
+After a successful POST, the host agent will stop and remove your container after the cooldown window described above (default 5 min). Exit cleanly whenever your post-match work is done; the platform will catch up.
 
 ### 4b. Match artifacts (optional, separate from spectator stream)
 
@@ -132,7 +134,7 @@ Content-Type: <whatever describes the bytes — image/png, application/octet-str
 
 Rules:
 
-- **Auth** is your match's `token_id` in the `Authorization: Bearer …` header — same credential as `/result/report`. Valid only while the match is still underway; calling after `/result/report` returns `403 match is not underway`.
+- **Auth** is your match's `token_id` in the `Authorization: Bearer …` header — same credential as `/result/report`. Valid while the match is underway **and** through the post-result cooldown window (see "Post-result cooldown" above). After the cooldown window expires the call returns `403 match is not underway`.
 - **Name** must match `[a-zA-Z0-9._-]{1,64}`. Re-uploading the same name overwrites. Up to **10 distinct names** per match.
 - **Body cap**: 1 MiB. `413 Request Entity Too Large` for anything bigger. Use the spectator stream for high-bandwidth data.
 - **Content-Type** is preserved exactly and returned as the response Content-Type when clients download — set it correctly so `image/png` thumbnails render in browsers.
@@ -210,7 +212,7 @@ The same key can exist in both namespaces with independent values; they don't co
 All four endpoints below require **the same `-token` value you got in argv**, passed as `Authorization: Bearer <token>`. The matchmaker:
 
 - Resolves the token to a match.
-- Confirms the match is still underway (the row is deleted at end-of-match — auth fails after that).
+- Confirms the match is underway or within its post-result cooldown window (the row is deleted only after the cooldown sweep — auth fails after that).
 - Confirms the URL `gameID` matches the match's game.
 - Confirms the URL `playerID` is one of the players in your match.
 - Rejects guest player IDs (`g_…`) with `400` — guests are intentionally unsupported on this feature.
@@ -280,7 +282,7 @@ Error codes:
 
 ### Patterns
 
-- **Grant on result** — write achievements / level deltas in the same critical section as your `POST /result/report`. Order doesn't matter; both endpoints take the same `-token`. Just remember the match auth dies the moment you POST the result, so do the data writes first or be ready to handle 401 on the trailing one.
+- **Grant on result** — write achievements / level deltas in the same critical section as your `POST /result/report`. Order doesn't matter; both endpoints take the same `-token`. Writes also work during the post-result cooldown window (see "Post-result cooldown" in §4), so you can defer end-of-match data writes until after the result POST without racing teardown.
 - **Carry-over state** — at match start, `GET …/{playerID}/server` for each player to load their persisted level/progression before the game begins. Write back at end-of-match.
 - **Read-modify-write races** — full-blob writes; if two of your servers write the same key concurrently, last write wins. For counter-style state that needs atomicity, you'll need to add your own server-side merge logic (or model achievements as separate keys per achievement, which sidesteps the issue).
 
@@ -431,7 +433,7 @@ You don't need to expose a `/health` endpoint of your own (though `example-game-
 ## Operational notes
 
 - **Cold starts.** A fresh host VM takes ~30–60 s to provision (Hetzner boot + Docker pull). Once a host is warm, container start is a few seconds. The service maintains a small warm pool (1 slot in production) to absorb the first match's cold start.
-- **Lifetime.** Your container is killed after you POST the result, or by garbage collection if the match runs longer than the configured timeout (~minutes; see `MATCH_GC_INTERVAL`). Don't rely on long-lived state inside the container.
+- **Lifetime.** Your container is killed after the post-result cooldown window elapses (default 5 min after `/result/report`; see `MATCH_COOLDOWN_DURATION`), or by garbage collection if the match runs longer than the absolute timeout (~6 hours; see `MATCH_GC_INTERVAL`). Don't rely on long-lived state inside the container.
 - **No persistent storage.** Anything you write to disk is gone when the container dies. Persistent game state (ratings, history) is elo-service's responsibility, not yours — you only report winners.
 - **Multiple containers per host.** Up to `HCLOUD_MAX_SLOTS_PER_HOST` containers (default 8) share one VM. Don't assume you have the whole CPU/RAM.
 

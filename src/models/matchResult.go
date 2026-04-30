@@ -56,6 +56,27 @@ func (m *MatchResult) ToResp() *MatchResultResp {
 	}
 }
 
+// MatchEnded is phase A of match completion. Writes the MatchResult,
+// flips the Match into cooldown (Match row stays alive so the auth_code
+// keeps resolving for post-result artifact uploads and server-authored
+// player_data writes), and applies rating updates — all in one
+// transaction so the rating delta cannot drift from the result that
+// justified it.
+//
+// The container teardown (stop, free ports, delete Match row, mark SI
+// deleted) is phase B, run by the worker cooldown sweep after
+// Config.MatchCooldownDuration has elapsed since this call. See
+// FinalizeMatchTeardown.
+//
+// logsKey and artifacts may be empty/nil at phase A — both are
+// re-populated in phase B from whatever the agent and S3 index have at
+// teardown time, so anything the game server uploads during the
+// cooldown window still appears in the final MatchResult.
+//
+// Note: Match and MatchResult share UUIDs (intentional — keeps the
+// match_id stable across the whole lifecycle), so they coexist in
+// different tables for the duration of the cooldown. No PK conflict
+// because they're separate tables.
 func MatchEnded(matchID string, winnerIDs []string, result string, logsKey string, artifacts []string, adjustRatings bool) (*MatchResult, error) {
 	match, err := GetMatch(matchID)
 	if err != nil {
@@ -65,13 +86,6 @@ func MatchEnded(matchID string, winnerIDs []string, result string, logsKey strin
 	if artifacts == nil {
 		artifacts = []string{}
 	}
-	// Preserve the Match's UUID as the MatchResult's UUID so the same
-	// match_id flows through the whole lifecycle: matchmaker WS, player
-	// reconnect, spectator stream, replay archive, /results, and the
-	// artifact routes all key on one ID. (Match and MatchResult are
-	// different tables; sharing a UUID isn't a PK conflict, and the
-	// Match row is deleted in this same transaction so they never
-	// coexist long.)
 	matchResult := &MatchResult{
 		ID:        matchID,
 		GameID:    match.GameID,
@@ -82,28 +96,27 @@ func MatchEnded(matchID string, winnerIDs []string, result string, logsKey strin
 		LogsKey:   logsKey,
 		Artifacts: pq.StringArray(artifacts),
 	}
-	slog.Info("Match ended", "matchID", matchID, "winnerIDs", winnerIDs, "result", result, "logsKey", logsKey, "adjustRatings", adjustRatings)
+	slog.Info("Match ended (phase A)", "matchID", matchID, "winnerIDs", winnerIDs, "result", result, "adjustRatings", adjustRatings)
 
-	// Report result, delete match, and (if applicable) update ratings in one
-	// transaction so the rating delta cannot drift from the result that
-	// justified it.
 	err = server.S.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(matchResult).Error; err != nil {
 			return err
 		}
 
-		// Clear the many2many join rows before deleting the match itself.
-		// GORM does not auto-cascade many2many on Delete, and the FK
-		// (fk_match_players_match) blocks the delete otherwise. Bug
-		// surfaces only when the match contained registered users —
-		// guest-only matches store IDs inline in matches.guest_ids and
-		// never touch this join table.
-		if err := tx.Exec("DELETE FROM match_players WHERE match_id = ?", matchID).Error; err != nil {
+		if err := SetMatchStatusCooldown(tx, matchID); err != nil {
 			return err
 		}
 
-		if err := tx.Delete(&Match{ID: matchID}).Error; err != nil {
-			return err
+		// Flip the SI into cooldown too — the worker sweep keys on
+		// ServerInstance.status to find rows ready for teardown. The
+		// no-SI degenerate path (synthetic / test matches) is a no-op
+		// here; EndMatch's caller handles its own teardown inline.
+		if match.ServerInstanceID != "" {
+			if err := tx.Model(&ServerInstance{}).
+				Where("id = ?", match.ServerInstanceID).
+				Update("status", ServerInstanceStatusCooldown).Error; err != nil {
+				return err
+			}
 		}
 
 		if adjustRatings && match.Game.ELOStrategy == ELO_STRATEGY_CLASSIC {
@@ -124,6 +137,46 @@ func MatchEnded(matchID string, winnerIDs []string, result string, logsKey strin
 	}
 
 	return matchResult, nil
+}
+
+// FinalizeMatchTeardown is phase B of match completion: patches the
+// MatchResult with the now-final logs key and artifact list, deletes
+// the Match row (and its many2many join), in one transaction. Called
+// by the worker cooldown sweep once the cooldown window has elapsed
+// and the container has been stopped.
+//
+// logsKey/artifacts overwrite whatever phase A set — anything uploaded
+// during the cooldown window lands here. Pass empty/nil to leave the
+// existing values alone (force-finalize path on agent failure).
+func FinalizeMatchTeardown(matchID string, logsKey string, artifacts []string) error {
+	return server.S.DB.Transaction(func(tx *gorm.DB) error {
+		updates := map[string]interface{}{}
+		if logsKey != "" {
+			updates["logs_key"] = logsKey
+		}
+		if artifacts != nil {
+			updates["artifacts"] = pq.StringArray(artifacts)
+		}
+		if len(updates) > 0 {
+			if err := tx.Model(&MatchResult{}).
+				Where("id = ?", matchID).
+				Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+
+		// Clear the many2many join rows before deleting the match itself.
+		// GORM does not auto-cascade many2many on Delete, and the FK
+		// (fk_match_players_match) blocks the delete otherwise. Bug
+		// surfaces only when the match contained registered users —
+		// guest-only matches store IDs inline in matches.guest_ids and
+		// never touch this join table.
+		if err := tx.Exec("DELETE FROM match_players WHERE match_id = ?", matchID).Error; err != nil {
+			return err
+		}
+
+		return tx.Delete(&Match{ID: matchID}).Error
+	})
 }
 
 func GetMatchResult(matchID string) (*MatchResult, error) {

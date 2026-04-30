@@ -13,6 +13,23 @@ type Config struct {
 	Port                          string
 	MatchmakingPairingMinInterval time.Duration
 	MatchmakingGCMinInterval      time.Duration
+	// MatchCooldownDuration is how long after /result/report the game
+	// container, host ports, and match auth_code remain alive before the
+	// worker GC sweep tears them down. The cooldown lets the game server
+	// finish post-match work (artifact uploads, server-authored
+	// player_data writes) without racing teardown. Zero disables the
+	// cooldown entirely — the report path runs phase A and phase B
+	// back-to-back, matching pre-cooldown behavior.
+	MatchCooldownDuration time.Duration
+	// MatchCooldownForceDeadline is the absolute cap on how long an
+	// instance may sit in cooldown before the sweep force-finalizes it
+	// regardless of agent reachability. Measured from MatchResult.CreatedAt
+	// (i.e. when the result was reported), so it includes the cooldown
+	// window itself. After this point: ports are freed, the SI is marked
+	// deleted, and the Match row is dropped, even if the agent stop call
+	// kept failing. Guards against a permanently-broken agent leaking
+	// ports/rows.
+	MatchCooldownForceDeadline    time.Duration
 	FlyAPIHostname                string
 	FlyAPIKey                     string
 	FlyAppName                    string
@@ -91,6 +108,33 @@ func InitConfig() (*Config, error) {
 		cfg.MatchmakingGCMinInterval = matchGCInterval
 	} else {
 		cfg.MatchmakingGCMinInterval = 1 * time.Minute
+	}
+
+	// Negative is rejected; zero is meaningful (disable cooldown). Use
+	// raw os.Getenv presence — not ParseDuration's err — to distinguish
+	// "unset" (apply default) from "set to 0" (disable).
+	if v := os.Getenv("MATCH_COOLDOWN_DURATION"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			return nil, fmt.Errorf("MATCH_COOLDOWN_DURATION must be a non-negative duration")
+		}
+		cfg.MatchCooldownDuration = d
+	} else {
+		cfg.MatchCooldownDuration = 5 * time.Minute
+	}
+
+	if v := os.Getenv("MATCH_COOLDOWN_FORCE_DEADLINE"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return nil, fmt.Errorf("MATCH_COOLDOWN_FORCE_DEADLINE must be a positive duration")
+		}
+		cfg.MatchCooldownForceDeadline = d
+	} else {
+		cfg.MatchCooldownForceDeadline = 30 * time.Minute
+	}
+	if cfg.MatchCooldownForceDeadline < cfg.MatchCooldownDuration {
+		return nil, fmt.Errorf("MATCH_COOLDOWN_FORCE_DEADLINE (%s) must be >= MATCH_COOLDOWN_DURATION (%s)",
+			cfg.MatchCooldownForceDeadline, cfg.MatchCooldownDuration)
 	}
 
 	if cfg.RedisURL = os.Getenv("REDIS_URL"); cfg.RedisURL == "" {
