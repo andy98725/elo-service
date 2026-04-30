@@ -57,7 +57,9 @@ func UploadMatchArtifact(ctx echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "invalid match auth token")
 	}
-	if match.Status != "started" {
+	// Allow uploads during the post-result cooldown window so game
+	// servers can push the final replay/preview without racing teardown.
+	if !models.IsMatchActiveOrCooling(match) {
 		return echo.NewHTTPError(http.StatusForbidden, "match is not underway")
 	}
 

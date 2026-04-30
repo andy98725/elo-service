@@ -15,12 +15,18 @@ const matchContextKey = "playerData.match"
 
 // requireMatchAuth resolves and validates the match auth code carried in
 // the Authorization header, then enforces:
-//   - the match is still underway (not ended)
+//   - the match is still underway OR within its post-result cooldown
+//     window (not torn down)
 //   - the URL :gameID matches the match's game
 //   - the URL :playerID is in the match (and is not a guest)
 //
 // On success the handler can pull the match from the context with
 // c.Get(matchContextKey).(*models.Match).
+//
+// The cooldown allowance lets game servers finish post-match
+// player_data writes after /result/report without racing the worker
+// teardown. Once the cooldown sweep deletes the Match row, the auth
+// code stops resolving and callers get 401.
 func requireMatchAuth(handler echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		token := c.Request().Header.Get("Authorization")
@@ -35,7 +41,7 @@ func requireMatchAuth(handler echo.HandlerFunc) echo.HandlerFunc {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusUnauthorized, "invalid match auth token")
 		}
-		if match.Status != "started" {
+		if !models.IsMatchActiveOrCooling(match) {
 			return echo.NewHTTPError(http.StatusForbidden, "match is not underway")
 		}
 

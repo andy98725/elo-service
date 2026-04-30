@@ -10,7 +10,19 @@ import (
 
 const (
 	ServerInstanceStatusStarting = "starting"
-	ServerInstanceStatusDeleted  = "deleted"
+	// ServerInstanceStatusCooldown means the match has reported results but
+	// the container is being deliberately left alive for a grace window
+	// (see Config.MatchCooldownDuration). The worker GC sweep transitions
+	// these to ServerInstanceStatusDeleted once the window expires.
+	ServerInstanceStatusCooldown = "cooldown"
+	// ServerInstanceStatusTearingDown is the transient claim state used by
+	// the cooldown sweep to prevent multiple worker instances (each Fly
+	// machine runs one) from racing teardown of the same SI. The atomic
+	// UPDATE cooldown -> tearing_down is the claim — only one worker wins.
+	// On agent-stop success the row transitions to deleted; on failure it
+	// reverts to cooldown so the next sweep retries.
+	ServerInstanceStatusTearingDown = "tearing_down"
+	ServerInstanceStatusDeleted     = "deleted"
 )
 
 type ServerInstance struct {
@@ -72,4 +84,98 @@ func CountActiveInstancesOnHost(hostID string) (int64, error) {
 		Where("machine_host_id = ? AND status != ?", hostID, ServerInstanceStatusDeleted).
 		Count(&count).Error
 	return count, err
+}
+
+// CooldownEntry pairs a ServerInstance currently in the cooldown lifecycle
+// state with its associated Match and the timestamp at which results were
+// reported (MatchResult.CreatedAt). Returned by ListCooldownInstancesReady
+// so the sweep can decide between normal teardown and force-finalize
+// without a second query.
+type CooldownEntry struct {
+	Instance     ServerInstance
+	Match        Match
+	ResultEnded  time.Time
+}
+
+// ListCooldownInstancesReady returns every ServerInstance currently in
+// cooldown whose result was reported more than `cooldownDuration` ago.
+// Joins through matches → match_results to read the result timestamp,
+// then re-fetches each SI and Match with their associations preloaded
+// so the sweep can act on the rows directly.
+//
+// Used by the worker's cooldown sweep. The sweep attempts an atomic
+// claim per row (ClaimCooldownInstance) before doing teardown work, so
+// callers don't need pagination for write-conflict isolation — but a
+// page_size guard would be reasonable to add if production fleets grow.
+func ListCooldownInstancesReady(cooldownDuration time.Duration) ([]CooldownEntry, error) {
+	// Pass UTC so the parameter format matches whatever the storage
+	// layer used for created_at. Postgres normalizes timestamps fine
+	// either way, but SQLite stores DATETIME columns as TEXT and
+	// compares lexically — a local-TZ cutoff string sorts wrong against
+	// a UTC stored value.
+	cutoff := time.Now().UTC().Add(-cooldownDuration)
+
+	type row struct {
+		InstanceID  string    `gorm:"column:instance_id"`
+		EndedAt     time.Time `gorm:"column:result_ended_at"`
+	}
+	var rows []row
+	err := server.S.DB.
+		Table("server_instances AS si").
+		Select("si.id AS instance_id, mr.created_at AS result_ended_at").
+		Joins("JOIN matches m ON m.server_instance_id = si.id").
+		Joins("JOIN match_results mr ON mr.id = m.id").
+		Where("si.status = ?", ServerInstanceStatusCooldown).
+		Where("mr.created_at <= ?", cutoff).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]CooldownEntry, 0, len(rows))
+	for _, r := range rows {
+		// Skip-on-error: a missing host means the row is already
+		// orphaned and ReconcileOrphanedInstances will handle it.
+		si, err := GetServerInstance(r.InstanceID)
+		if err != nil {
+			continue
+		}
+		var match Match
+		if err := server.S.DB.First(&match, "server_instance_id = ?", r.InstanceID).Error; err != nil {
+			continue
+		}
+		out = append(out, CooldownEntry{
+			Instance:    *si,
+			Match:       match,
+			ResultEnded: r.EndedAt,
+		})
+	}
+	return out, nil
+}
+
+// ClaimCooldownInstance atomically transitions an instance from cooldown
+// to tearing_down. Returns true if this caller won the claim (the row
+// was at status='cooldown' before this call). Returns false without
+// error when another worker already claimed the row — the caller should
+// skip it.
+//
+// This is the multi-worker race guard for the cooldown sweep: every Fly
+// machine runs the sweep, but only one wins per row.
+func ClaimCooldownInstance(id string) (bool, error) {
+	res := server.S.DB.Model(&ServerInstance{}).
+		Where("id = ? AND status = ?", id, ServerInstanceStatusCooldown).
+		Update("status", ServerInstanceStatusTearingDown)
+	if res.Error != nil {
+		return false, res.Error
+	}
+	return res.RowsAffected == 1, nil
+}
+
+// RevertTearingDownToCooldown returns a claimed instance to cooldown so
+// the next sweep retries. Used when the agent stop call fails but we
+// haven't hit the force deadline yet.
+func RevertTearingDownToCooldown(id string) error {
+	return server.S.DB.Model(&ServerInstance{}).
+		Where("id = ? AND status = ?", id, ServerInstanceStatusTearingDown).
+		Update("status", ServerInstanceStatusCooldown).Error
 }

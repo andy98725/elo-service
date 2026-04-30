@@ -53,6 +53,14 @@ func RunWorker(ctx context.Context, shutdown chan struct{}) {
 		if err := matchmaking.GarbageCollectMatches(ctx); err != nil {
 			slog.Error("Failed to garbage collect matches", "error", err)
 		}
+		// Phase B of match completion: tear down containers whose
+		// post-result cooldown window has elapsed. Runs after
+		// GarbageCollectMatches so a just-timed-out match (which enters
+		// cooldown via EndMatch) doesn't get swept the same tick — the
+		// cooldown duration is the gap.
+		if err := matchmaking.SweepCooledMatches(ctx); err != nil {
+			slog.Error("Failed to sweep cooled matches", "error", err)
+		}
 		// Order matters: ReconcileLiveHosts flips stale MachineHost rows to
 		// 'deleted', which ReconcileOrphanedInstances then walks (SI → host)
 		// to tear down any ServerInstance rows that referenced them. Same

@@ -48,6 +48,21 @@ A `Match` references a `ServerInstance`, which references a `MachineHost`. `matc
    ```
    No `auth_code` — players are identified by their JWT-derived player IDs on the game server side (see PR #5 changes).
 
+### Match completion lifecycle (cooldown)
+
+`/result/report` doesn't immediately tear the container down. Match completion is split into two phases:
+
+- **Phase A** (synchronous on `/result/report`, in [`EndMatch`](src/api/matchResults/reportResults.go)): stops the spectator uploader, moves live spectator chunks to the replay prefix, writes the `MatchResult` row, and flips both `Match.status` and the linked `ServerInstance.status` to `cooldown`. Ratings update here too. The container keeps running and the match `auth_code` keeps resolving — game servers can continue calling `POST /match/artifact` and the server-authored `/games/:gameID/data/:playerID/...` endpoints to finish post-match work.
+- **Phase B** (async, in the worker GC pass — [`SweepCooledMatches`](src/worker/matchmaking/garbageCollectMatches.go) → [`TeardownCooledMatch`](src/api/matchResults/reportResults.go)): once `MATCH_COOLDOWN_DURATION` (default 5 min, measured from `MatchResult.CreatedAt`) has elapsed, saves the container logs, re-reads the artifact index (so cooldown-window uploads land in `MatchResult.Artifacts`), stops the container, frees the host ports, marks the SI deleted, deletes the Match row, and tries to reap the host.
+
+Multi-process safety: every Fly machine runs the sweep, so each row is claimed atomically via `cooldown → tearing_down` ([`ClaimCooldownInstance`](src/models/server_instance.go)) before teardown work runs. Losers skip silently. On agent-stop failure, the SI reverts to `cooldown` and the next sweep retries — until `MATCH_COOLDOWN_FORCE_DEADLINE` (default 30 min, measured from result-report time) elapses, at which point the sweep force-finalizes (frees ports, deletes Match row, marks SI deleted) regardless of agent reachability; `ReconcileLiveHosts` / `ReconcileOrphanedInstances` reap any container left running on a dead host.
+
+`MATCH_COOLDOWN_DURATION=0` disables the grace period entirely — `EndMatch` runs phase B inline against the just-cooldown'd row, matching pre-cooldown behavior. The integration test harness boots with cooldown disabled (zero value); [`tests/integration/cooldown_test.go`](tests/integration/cooldown_test.go) opts in via `withCooldown` and is the only place that exercises the deferred-teardown path.
+
+Re-reporting a result while the match is in cooldown returns `409 Conflict`. Results are immutable.
+
+Audience-facing implication for the game-server contract is the "Post-result cooldown" callout in [`docs/elo-service-server.md`](docs/elo-service-server.md).
+
 ### Lobby flow
 
 [`src/api/lobby/`](src/api/lobby/) — three WebSocket routes (`/lobby/host`, `/lobby/find`, `/lobby/join`) plus chat/`/disconnect`/`/start` host commands. Reuses the same `match_ready_<gameID>__<playerID>` pubsub channel as matchmaking, so post-`/start` clients get the identical `match_found` handshake.
@@ -56,7 +71,7 @@ Capacity is enforced atomically via a Lua script in [`src/external/redis/lobby.g
 
 ### Worker
 
-Single in-process goroutine in [`src/worker/worker.go`](src/worker/worker.go). Two pubsub triggers (`matchmaking`, `garbage_collection`) wake it; an interval floor on each prevents thrash. The GC pass runs `GarbageCollectMatches`, `CleanupExpiredPlayers`, `CleanupExpiredLobbies`, and `MaintainWarmPool` in sequence.
+Single in-process goroutine in [`src/worker/worker.go`](src/worker/worker.go). Two pubsub triggers (`matchmaking`, `garbage_collection`) wake it; an interval floor on each prevents thrash. The GC pass runs `GarbageCollectMatches`, `SweepCooledMatches` (phase B of match completion — see "Match completion lifecycle" below), `ReconcileLiveHosts`, `ReconcileOrphanedInstances`, `CleanupExpiredPlayers`, `MaintainWarmPool`, and `CleanupExpiredLobbies` in sequence.
 
 ### Warm pool
 
@@ -154,6 +169,7 @@ Notable tunables:
 - `HCLOUD_MAX_HOSTS` (default 5), `HCLOUD_MAX_SLOTS_PER_HOST` (default 8), `HCLOUD_WARM_SLOTS` (default 0; production = 1).
 - `HCLOUD_AGENT_PORT` (default 8080), `HCLOUD_PORT_RANGE_START` / `_END` (default 7000-9000) — host-port pool the agent allocates from.
 - `MATCHMAKING_INTERVAL` (default 100 ms), `MATCH_GC_INTERVAL` (default 1 m) — minimum spacing between worker passes.
+- `MATCH_COOLDOWN_DURATION` (default `5m`) — post-`/result/report` grace window during which the container and `auth_code` stay alive. Set to `0` to disable. `MATCH_COOLDOWN_FORCE_DEADLINE` (default `30m`) — absolute cap from result-report time before the sweep force-finalizes regardless of agent reachability. Both validated at startup; force-deadline must be ≥ duration.
 
 ## Domains
 

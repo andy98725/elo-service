@@ -31,6 +31,7 @@ type ReportResultsRequest struct {
 // @Success      200 {object} map[string]string "message"
 // @Failure      400 {object} echo.HTTPError
 // @Failure      404 {object} echo.HTTPError
+// @Failure      409 {object} echo.HTTPError "match already ended"
 // @Failure      500 {object} echo.HTTPError
 // @Router       /result/report [post]
 func ReportResults(c echo.Context) error {
@@ -47,6 +48,13 @@ func ReportResults(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "Match not found")
 	}
 
+	// Reject re-reports. The auth_code stays valid through cooldown so
+	// game servers can finish artifact/player_data writes, but results
+	// themselves are immutable once written.
+	if match.Status != models.MatchStatusStarted {
+		return echo.NewHTTPError(http.StatusConflict, "match already ended")
+	}
+
 	adjustRatings := true
 	if req.AdjustRatings != nil {
 		adjustRatings = *req.AdjustRatings
@@ -58,6 +66,24 @@ func ReportResults(c echo.Context) error {
 	return c.JSON(http.StatusOK, echo.Map{"message": status})
 }
 
+// EndMatch is phase A of match completion. Synchronously: stops the
+// spectator uploader, moves live spectator chunks into the replay
+// prefix, writes the MatchResult, and flips the Match into cooldown
+// (where the auth_code stays valid for the configured grace window so
+// the game server can finish post-result work). Container teardown,
+// log capture, port release, and Match-row deletion happen later in
+// phase B (TeardownCooledMatch) once the cooldown window expires.
+//
+// When Config.MatchCooldownDuration is zero, callers should immediately
+// follow EndMatch with TeardownCooledMatch — the worker sweep will
+// behave identically given a zero-second window, so the synchronous
+// chain is just an optimization for tests and the disable-cooldown
+// case.
+//
+// Matches with no ServerInstance (synthetic / test path) skip the
+// cooldown entirely: there is no container to keep alive and no
+// auth_code work to defer, so we run a degenerate phase-A-then-B
+// inline.
 func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reason string, adjustRatings bool) (string, error) {
 	if isUnderway, err := models.IsMatchUnderway(match.ID); err != nil {
 		return "", err
@@ -81,69 +107,116 @@ func EndMatch(ctx context.Context, match *models.Match, winnerIDs []string, reas
 		}
 	}
 
-	status := ""
-
-	if match.ServerInstanceID != "" {
-		si, err := models.GetServerInstance(match.ServerInstanceID)
-		if err != nil {
-			slog.Error("Failed to load server instance for match", "error", err, "matchID", match.ID)
-			return "", err
-		}
-
-		logsKey, err := saveMatchLogs(ctx, si)
-		if err != nil {
-			slog.Warn("Failed to save match logs", "error", err, "matchID", match.ID)
-			logsKey = ""
-			status = "Failed to save match logs"
-		}
-
-		// Pull the artifact name list from the S3 index the upload
-		// route maintained during the match. Best-effort: a storage
-		// hiccup here logs and stores an empty list; the artifacts
-		// themselves still exist in S3 and can be reattached
-		// out-of-band if needed.
-		var artifactNames []string
-		if index, err := server.S.AWS.GetMatchArtifactIndex(ctx, match.ID); err != nil {
-			slog.Warn("Failed to read artifact index", "error", err, "matchID", match.ID)
-		} else {
-			artifactNames = make([]string, 0, len(index))
-			for name := range index {
-				artifactNames = append(artifactNames, name)
-			}
-		}
-
-		if _, err := models.MatchEnded(match.ID, winnerIDs, reason, logsKey, artifactNames, adjustRatings); err != nil {
-			slog.Error("Failed to record match result", "error", err, "matchID", match.ID)
-			return "", err
-		}
-
-		if err := hetzner.StopContainer(ctx,
-			si.MachineHost.PublicIP, si.MachineHost.AgentPort, si.MachineHost.AgentToken,
-			si.ContainerID, si.SpectateID); err != nil {
-			slog.Error("Failed to stop game container; it may still be running", "error", err,
-				"containerID", si.ContainerID, "hostID", si.MachineHostID)
-		}
-
-		if err := models.FreePorts(si.MachineHostID, []int64(si.HostPorts)); err != nil {
-			slog.Error("Failed to free ports", "error", err, "hostID", si.MachineHostID)
-		}
-
-		if err := models.SetServerInstanceStatus(si.ID, models.ServerInstanceStatusDeleted); err != nil {
-			slog.Error("Failed to mark server instance deleted", "error", err, "instanceID", si.ID)
-		}
-
-		go tryDeleteIdleHost(&si.MachineHost)
-	} else {
+	if match.ServerInstanceID == "" {
+		// No container to keep alive — write the result and immediately
+		// finalize. Skips the cooldown lifecycle entirely.
 		if _, err := models.MatchEnded(match.ID, winnerIDs, reason, "", nil, adjustRatings); err != nil {
 			slog.Error("Failed to record match result", "error", err, "matchID", match.ID)
 			return "", err
 		}
+		if err := models.FinalizeMatchTeardown(match.ID, "", nil); err != nil {
+			slog.Error("Failed to finalize match teardown", "error", err, "matchID", match.ID)
+			return "", err
+		}
+		return "Thank you!", nil
 	}
 
-	if status == "" {
-		status = "Thank you!"
+	// Phase A: write the result with empty logs/artifacts placeholders.
+	// Phase B re-reads the agent and S3 index at sweep time, so anything
+	// uploaded during the cooldown window still lands in MatchResult.
+	if _, err := models.MatchEnded(match.ID, winnerIDs, reason, "", nil, adjustRatings); err != nil {
+		slog.Error("Failed to record match result", "error", err, "matchID", match.ID)
+		return "", err
 	}
-	return status, nil
+
+	// If the operator has disabled the cooldown, run phase B inline
+	// against the just-cooldown'd row. The worker would do the same
+	// thing on its next tick anyway; doing it here keeps tests and
+	// no-cooldown deployments behaving like the pre-cooldown code.
+	if server.S.Config != nil && server.S.Config.MatchCooldownDuration == 0 {
+		si, err := models.GetServerInstance(match.ServerInstanceID)
+		if err != nil {
+			slog.Error("Failed to load server instance for inline teardown", "error", err, "matchID", match.ID)
+			return "Thank you!", nil
+		}
+		if claimed, err := models.ClaimCooldownInstance(si.ID); err != nil || !claimed {
+			// Another worker beat us; that worker will finish the work.
+			return "Thank you!", nil
+		}
+		TeardownCooledMatch(ctx, si, &models.Match{ID: match.ID}, false)
+		return "Thank you!", nil
+	}
+
+	return "Thank you!", nil
+}
+
+// TeardownCooledMatch is phase B of match completion: stops the
+// container, frees ports, marks the SI deleted, finalizes the
+// MatchResult with the now-final logs key and artifact list, deletes
+// the Match row, and (best-effort) reaps the host if it's now idle.
+//
+// The caller MUST have already won the cooldown claim via
+// ClaimCooldownInstance (the SI status is already 'tearing_down').
+// On agent-stop failure with force=false, the SI is reverted to
+// 'cooldown' so the next sweep retries; with force=true (caller has
+// hit the force deadline) the function proceeds with port release
+// and Match deletion regardless, leaving any actual container alive
+// on the host until ReconcileLiveHosts/ReconcileOrphanedInstances
+// catches it.
+func TeardownCooledMatch(ctx context.Context, si *models.ServerInstance, match *models.Match, force bool) {
+	matchID := match.ID
+
+	logsKey, err := saveMatchLogs(ctx, si)
+	if err != nil {
+		slog.Warn("Failed to save match logs", "error", err, "matchID", matchID)
+		logsKey = ""
+	}
+
+	// Re-read the artifact index so anything uploaded during the
+	// cooldown window appears in the final MatchResult. Best-effort:
+	// a storage hiccup here keeps whatever phase A set (which is
+	// empty in the new flow, but defending the contract anyway).
+	var artifactNames []string
+	if index, err := server.S.AWS.GetMatchArtifactIndex(ctx, matchID); err != nil {
+		slog.Warn("Failed to read artifact index at teardown", "error", err, "matchID", matchID)
+	} else {
+		artifactNames = make([]string, 0, len(index))
+		for name := range index {
+			artifactNames = append(artifactNames, name)
+		}
+	}
+
+	stopErr := hetzner.StopContainer(ctx,
+		si.MachineHost.PublicIP, si.MachineHost.AgentPort, si.MachineHost.AgentToken,
+		si.ContainerID, si.SpectateID)
+	if stopErr != nil {
+		slog.Error("Failed to stop game container during cooldown sweep", "error", stopErr,
+			"containerID", si.ContainerID, "hostID", si.MachineHostID, "force", force)
+		if !force {
+			// Revert so the next sweep retries.
+			if err := models.RevertTearingDownToCooldown(si.ID); err != nil {
+				slog.Error("Failed to revert SI to cooldown after stop failure", "error", err, "instanceID", si.ID)
+			}
+			return
+		}
+		// force=true: continue with the rest of teardown so we don't
+		// leak ports / DB rows. The container itself may keep running
+		// on the host; the host-level reconcilers will catch it.
+	}
+
+	if err := models.FreePorts(si.MachineHostID, []int64(si.HostPorts)); err != nil {
+		slog.Error("Failed to free ports", "error", err, "hostID", si.MachineHostID)
+	}
+
+	if err := models.SetServerInstanceStatus(si.ID, models.ServerInstanceStatusDeleted); err != nil {
+		slog.Error("Failed to mark server instance deleted", "error", err, "instanceID", si.ID)
+	}
+
+	if err := models.FinalizeMatchTeardown(matchID, logsKey, artifactNames); err != nil {
+		slog.Error("Failed to finalize match teardown", "error", err, "matchID", matchID)
+	}
+
+	go tryDeleteIdleHost(&si.MachineHost)
 }
 
 // tryDeleteIdleHost deletes the host VM if it has no remaining active

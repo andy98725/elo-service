@@ -131,6 +131,50 @@ func GarbageCollectMatches(ctx context.Context) error {
 	return nil
 }
 
+// SweepCooledMatches is phase B of the match-completion lifecycle:
+// finds every ServerInstance currently in cooldown whose result was
+// reported more than Config.MatchCooldownDuration ago and tears it
+// down (stops container, frees ports, finalizes MatchResult, deletes
+// Match row).
+//
+// Multi-worker safe: each Fly machine runs this sweep, so the per-row
+// claim via ClaimCooldownInstance (atomic UPDATE cooldown ->
+// tearing_down) ensures only one worker does the work for any given
+// SI. Losers skip silently.
+//
+// Force-finalize: any SI whose result is older than
+// Config.MatchCooldownForceDeadline gets torn down even if the agent
+// stop call keeps failing — guards against a permanently-broken agent
+// leaking ports and DB rows. The actual container may keep running on
+// the host in that case; ReconcileLiveHosts / ReconcileOrphanedInstances
+// catch host-level orphans.
+func SweepCooledMatches(ctx context.Context) error {
+	cooldown := server.S.Config.MatchCooldownDuration
+	forceDeadline := server.S.Config.MatchCooldownForceDeadline
+
+	entries, err := models.ListCooldownInstancesReady(cooldown)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		claimed, err := models.ClaimCooldownInstance(entry.Instance.ID)
+		if err != nil {
+			slog.Error("Failed to claim cooldown instance", "error", err, "instanceID", entry.Instance.ID)
+			continue
+		}
+		if !claimed {
+			// Another worker beat us to it.
+			continue
+		}
+
+		force := time.Since(entry.ResultEnded) >= forceDeadline
+		matchResults.TeardownCooledMatch(ctx, &entry.Instance, &entry.Match, force)
+	}
+
+	return nil
+}
+
 func CleanupExpiredPlayers(ctx context.Context) error {
 	keys, err := server.S.Redis.AllQueues(ctx)
 	if err != nil {

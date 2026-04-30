@@ -195,11 +195,12 @@ func TestPlayerData_ServerCannotWriteAfterMatchEnds(t *testing.T) {
 	h := NewHarness(t)
 	gameID, _, p1ID, _, _, authCode := setupMatchedRegisteredGame(t, h, "end")
 
-	// End the match via the existing report endpoint. MatchEnded deletes
-	// the match row entirely (it doesn't just flip status), so the auth
-	// code stops resolving and we get 401, not 403. Either response is
-	// "the server can't write here anymore" — we assert specifically on
-	// 401 to pin the behavior.
+	// End the match via the report endpoint. With the test harness's
+	// default zero cooldown, EndMatch runs phase A and phase B inline
+	// — the Match row is gone by the time the report response returns,
+	// so the auth code stops resolving and we get 401 (not 403). With
+	// a non-zero cooldown the server WOULD still accept writes for the
+	// grace window; that path is covered by TestCooldownLifecycle.
 	DoReq(t, "POST", h.BaseURL()+"/result/report", map[string]interface{}{
 		"token_id": authCode,
 		"reason":   "done",

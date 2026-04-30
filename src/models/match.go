@@ -11,6 +11,19 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	// MatchStatusStarted is the in-flight state set by MatchStarted.
+	// Existing code references the literal "started" widely; new code
+	// should prefer the constant.
+	MatchStatusStarted = "started"
+	// MatchStatusCooldown is set by MatchEnded when results are reported.
+	// The Match row stays alive in this state so the auth_code keeps
+	// resolving — game servers can still upload artifacts and write
+	// server-authored player_data for the configured cooldown window.
+	// The worker sweep deletes the row when the window expires.
+	MatchStatusCooldown = "cooldown"
+)
+
 type Match struct {
 	ID               string         `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	GameID           string         `json:"game_id" gorm:"not null"`
@@ -209,7 +222,24 @@ func IsMatchUnderway(matchID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return match.Status == "started", nil
+	return match.Status == MatchStatusStarted, nil
+}
+
+// IsMatchActiveOrCooling reports whether a match is either still being
+// played ("started") or is within its post-result cooldown window
+// ("cooldown"). Used by the auth gates that game servers hit after
+// reporting — artifact uploads and server-authored player_data writes
+// stay valid for the cooldown so post-match work doesn't race teardown.
+func IsMatchActiveOrCooling(match *Match) bool {
+	return match.Status == MatchStatusStarted || match.Status == MatchStatusCooldown
+}
+
+// SetMatchStatusCooldown flips the match into the cooldown lifecycle
+// state without touching anything else. Caller (MatchEnded) is expected
+// to have already written the MatchResult row in the same transaction.
+func SetMatchStatusCooldown(tx *gorm.DB, matchID string) error {
+	return tx.Model(&Match{}).Where("id = ?", matchID).
+		Update("status", MatchStatusCooldown).Error
 }
 
 func CanUserSeeMatch(userID string, matchID string) (bool, error) {
