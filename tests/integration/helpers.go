@@ -153,6 +153,42 @@ func CreateGame(t *testing.T, baseURL string, token string, name string, lobbySi
 	}, token, http.StatusOK)
 }
 
+// DefaultQueueID returns the ID of the auto-created primary queue from a
+// game-create / game-fetch response. Useful for tests that need to talk
+// directly to Redis using the queue prefix instead of going through the
+// HTTP layer (which resolves queueID server-side).
+func DefaultQueueID(t *testing.T, game map[string]interface{}) string {
+	t.Helper()
+	queues, ok := game["queues"].([]interface{})
+	if !ok || len(queues) == 0 {
+		t.Fatalf("game has no queues: %+v", game)
+	}
+	q, _ := queues[0].(map[string]interface{})
+	id, _ := q["id"].(string)
+	if id == "" {
+		t.Fatalf("default queue has empty id: %+v", q)
+	}
+	return id
+}
+
+// CreateGameQueue adds an additional queue under an existing game. Used
+// by multi-queue tests; the auto-created primary queue is sufficient for
+// most test scenarios.
+func CreateGameQueue(t *testing.T, baseURL, token, gameID, name string, body map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	if body == nil {
+		body = map[string]interface{}{}
+	}
+	body["name"] = name
+	if _, ok := body["matchmaking_machine_name"]; !ok {
+		body["matchmaking_machine_name"] = "docker.io/test/game:latest"
+	}
+	if _, ok := body["matchmaking_machine_ports"]; !ok {
+		body["matchmaking_machine_ports"] = []int64{8080}
+	}
+	return DoReq(t, "POST", fmt.Sprintf("%s/game/%s/queue", baseURL, gameID), body, token, http.StatusOK)
+}
+
 func WebsocketConnect(t *testing.T, rawURL string, token string) *websocket.Conn {
 	t.Helper()
 

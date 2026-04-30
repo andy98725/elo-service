@@ -28,6 +28,8 @@ type Match struct {
 	ID               string         `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	GameID           string         `json:"game_id" gorm:"not null"`
 	Game             Game           `json:"game" gorm:"foreignKey:GameID"`
+	GameQueueID      string         `json:"game_queue_id" gorm:"not null"`
+	GameQueue        GameQueue      `json:"game_queue" gorm:"foreignKey:GameQueueID"`
 	ServerInstanceID string         `json:"server_instance_id" gorm:"index"`
 	ServerInstance   ServerInstance `json:"server_instance" gorm:"foreignKey:ServerInstanceID"`
 	Players          []User         `json:"players" gorm:"many2many:match_players;"`
@@ -84,7 +86,7 @@ func (m *Match) ConnectionAddress() string {
 // spectateEnabled is the resolved flag — caller is expected to have already
 // AND'd the game-level flag with any per-match override (lobby's spectate
 // param). This function does not re-validate.
-func MatchStarted(db *gorm.DB, gameID string, serverInstanceID string, authCode string, playerIDs []string, spectateEnabled bool) (*Match, error) {
+func MatchStarted(db *gorm.DB, gameID string, gameQueueID string, serverInstanceID string, authCode string, playerIDs []string, spectateEnabled bool) (*Match, error) {
 	var users []User
 	var guestIDs []string
 
@@ -98,6 +100,7 @@ func MatchStarted(db *gorm.DB, gameID string, serverInstanceID string, authCode 
 
 	match := &Match{
 		GameID:           gameID,
+		GameQueueID:      gameQueueID,
 		ServerInstanceID: serverInstanceID,
 		Players:          users,
 		GuestIDs:         guestIDs,
@@ -110,12 +113,12 @@ func MatchStarted(db *gorm.DB, gameID string, serverInstanceID string, authCode 
 		return nil, err
 	}
 
-	slog.Info("Match started", "gameID", gameID, "serverInstanceID", serverInstanceID, "playerIDs", playerIDs)
+	slog.Info("Match started", "gameID", gameID, "gameQueueID", gameQueueID, "serverInstanceID", serverInstanceID, "playerIDs", playerIDs)
 	return match, nil
 }
 
 func matchQuery() *gorm.DB {
-	return server.S.DB.Preload("ServerInstance.MachineHost").Preload("Game").Preload("Players")
+	return server.S.DB.Preload("ServerInstance.MachineHost").Preload("Game").Preload("GameQueue").Preload("Players")
 }
 
 func GetMatch(matchID string) (*Match, error) {

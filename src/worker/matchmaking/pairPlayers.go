@@ -33,15 +33,18 @@ const (
 )
 
 type JoinQueueResult struct {
-	QueueSize int64
-	QueueID   string
+	QueueSize   int64
+	QueueID     string
+	GameQueueID string
 }
 
-// JoinQueue places a player in the queue for (gameID, metadata).
+// JoinQueue places a player in the matchmaking queue for (gameID, queueID,
+// metadata). queueID may be empty — the game's default queue (oldest by
+// created_at) is used in that case.
 //
-// When game.MetadataEnabled is true, distinct metadata values land in
-// distinct sub-queues -- this is the segmentation feature (mode/region/
-// version). Two consequences worth being aware of:
+// When the resolved queue's MetadataEnabled is true, distinct metadata
+// values land in distinct sub-queues — the segmentation feature
+// (mode/region/version). Two consequences worth being aware of:
 //
 //  1. A single player CAN be in multiple sub-queues simultaneously by
 //     calling JoinQueue with different metadata. AddPlayerToQueueWithTTL
@@ -54,55 +57,55 @@ type JoinQueueResult struct {
 //     iterates every "queue_*" key (including composite ones), so they
 //     still get matched as soon as a sub-queue reaches LobbySize, or
 //     expire via TTL. No manual cleanup needed.
-func JoinQueue(ctx context.Context, playerID string, gameID string, metadata string) (*JoinQueueResult, error) {
-	game, err := models.GetGame(gameID)
+func JoinQueue(ctx context.Context, playerID string, gameID string, queueID string, metadata string) (*JoinQueueResult, error) {
+	queue, err := models.ResolveQueue(gameID, queueID)
 	if err != nil {
 		return nil, err
 	}
 
-	if !game.MetadataEnabled {
+	if !queue.MetadataEnabled {
 		metadata = ""
 	}
-	queueID := extRedis.QueueKey(gameID, metadata)
+	composite := extRedis.QueueKey(queue.ID, metadata)
 
-	if err := server.S.Redis.AddPlayerToQueueWithTTL(ctx, queueID, playerID, QUEUE_TTL); err != nil {
+	if err := server.S.Redis.AddPlayerToQueueWithTTL(ctx, composite, playerID, QUEUE_TTL); err != nil {
 		return nil, err
 	}
 
-	size, err := server.S.Redis.GameQueueSize(ctx, queueID)
+	size, err := server.S.Redis.GameQueueSize(ctx, composite)
 	if err != nil {
 		return nil, err
 	}
 
-	return &JoinQueueResult{QueueSize: size, QueueID: queueID}, nil
+	return &JoinQueueResult{QueueSize: size, QueueID: composite, GameQueueID: queue.ID}, nil
 }
 
-func QueueSize(ctx context.Context, gameID string, metadata string) (int64, error) {
-	game, err := models.GetGame(gameID)
+func QueueSize(ctx context.Context, gameID string, queueID string, metadata string) (int64, error) {
+	queue, err := models.ResolveQueue(gameID, queueID)
 	if err != nil {
 		return 0, err
 	}
 
-	if !game.MetadataEnabled {
+	if !queue.MetadataEnabled {
 		metadata = ""
 	}
-	queueID := extRedis.QueueKey(gameID, metadata)
+	composite := extRedis.QueueKey(queue.ID, metadata)
 
-	return server.S.Redis.GameQueueSize(ctx, queueID)
+	return server.S.Redis.GameQueueSize(ctx, composite)
 }
 
-func LeaveQueue(ctx context.Context, playerID string, gameID string, metadata string) error {
-	game, err := models.GetGame(gameID)
+func LeaveQueue(ctx context.Context, playerID string, gameID string, queueID string, metadata string) error {
+	queue, err := models.ResolveQueue(gameID, queueID)
 	if err != nil {
 		return err
 	}
 
-	if !game.MetadataEnabled {
+	if !queue.MetadataEnabled {
 		metadata = ""
 	}
-	queueID := extRedis.QueueKey(gameID, metadata)
+	composite := extRedis.QueueKey(queue.ID, metadata)
 
-	return server.S.Redis.RemovePlayerFromQueue(ctx, queueID, playerID)
+	return server.S.Redis.RemovePlayerFromQueue(ctx, composite, playerID)
 }
 
 type QueueResult struct {
@@ -110,9 +113,13 @@ type QueueResult struct {
 	Error   error
 }
 
-func NotifyOnReady(ctx context.Context, playerID string, gameID string, resultChan chan QueueResult) {
+// NotifyOnReady subscribes the player to match_ready notifications scoped
+// to a specific GameQueue. With multi-queue games a player may be in
+// several queues at once, so the channel must be queue-keyed (not
+// game-keyed).
+func NotifyOnReady(ctx context.Context, playerID string, gameQueueID string, resultChan chan QueueResult) {
 	go func() {
-		pubsub := server.S.Redis.WatchMatchReady(ctx, gameID, playerID)
+		pubsub := server.S.Redis.WatchMatchReady(ctx, gameQueueID, playerID)
 		defer pubsub.Close()
 
 		for msg := range pubsub.Channel() {
@@ -130,9 +137,9 @@ func NotifyOnReady(ctx context.Context, playerID string, gameID string, resultCh
 	}()
 }
 
-func notifyError(ctx context.Context, gameID string, players []string, msg string) {
+func notifyError(ctx context.Context, gameQueueID string, players []string, msg string) {
 	for _, player := range players {
-		server.S.Redis.PublishMatchReady(ctx, gameID, player, "error:"+msg)
+		server.S.Redis.PublishMatchReady(ctx, gameQueueID, player, "error:"+msg)
 	}
 }
 
@@ -142,19 +149,25 @@ func notifyError(ctx context.Context, gameID string, players []string, msg strin
 // reuse it after a host runs `/start` — same handshake, same backing
 // machinery.
 //
+// queue carries the per-pool config (image, ports, etc.) and identifies
+// the GameQueue these players were paired in. composite is the full Redis
+// queue key (queue.ID, optionally with the metadata-hash suffix); used by
+// the at-capacity push-back to return players to the same sub-queue they
+// were popped from.
+//
 // spectateOverride is the lobby-side opt-out: pass &false to disable
 // spectating for this specific match even when the game has it enabled.
 // Pass nil (the matchmaking-queue path) to inherit the game flag as-is.
 // The override is disable-only — it cannot enable spectating on a game
 // where Game.SpectateEnabled is false.
-func StartMatch(ctx context.Context, gameID string, game *models.Game, players []string, spectateOverride *bool) error {
-	slog.Info("Starting match", "gameID", gameID, "players", players)
+func StartMatch(ctx context.Context, game *models.Game, queue *models.GameQueue, composite string, players []string, spectateOverride *bool) error {
+	slog.Info("Starting match", "gameID", game.ID, "gameQueueID", queue.ID, "players", players)
 
-	gamePorts := []int64(game.MatchmakingMachinePorts)
+	gamePorts := []int64(queue.MatchmakingMachinePorts)
 	if len(gamePorts) == 0 {
-		err := fmt.Errorf("game %s has no ports configured; set matchmaking_machine_ports", gameID)
+		err := fmt.Errorf("queue %s has no ports configured; set matchmaking_machine_ports", queue.ID)
 		slog.Error("Cannot start match", "error", err)
-		notifyError(ctx, gameID, players, "server configuration error: no ports defined for this game")
+		notifyError(ctx, queue.ID, players, "server configuration error: no ports defined for this queue")
 		return err
 	}
 
@@ -164,19 +177,19 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 	host, err := models.FindAvailableHost(len(gamePorts), cfg.HCLOUDPortRangeStart, cfg.HCLOUDPortRangeEnd)
 	if err != nil {
 		slog.Error("Failed to find available host", "error", err)
-		notifyError(ctx, gameID, players, "failed to find available server host")
+		notifyError(ctx, queue.ID, players, "failed to find available server host")
 		return err
 	}
 
 	if host == nil {
 		count, err := models.CountMachineHosts()
 		if err != nil {
-			notifyError(ctx, gameID, players, "internal error")
+			notifyError(ctx, queue.ID, players, "internal error")
 			return fmt.Errorf("count machine hosts: %w", err)
 		}
 		if count >= int64(cfg.HCLOUDMaxHosts) {
 			slog.Warn("At capacity: all hosts full and max count reached", "maxHosts", cfg.HCLOUDMaxHosts)
-			server.S.Redis.PushPlayersToQueue(ctx, gameID, players)
+			server.S.Redis.PushPlayersToQueue(ctx, composite, players)
 			return fmt.Errorf("at capacity: %d/%d hosts in use", count, cfg.HCLOUDMaxHosts)
 		}
 
@@ -184,13 +197,13 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 		tlsOpts, err := buildHostTLSOpts()
 		if err != nil {
 			slog.Error("Failed to read wildcard cert; aborting host provision", "error", err)
-			notifyError(ctx, gameID, players, "wildcard cert unavailable")
+			notifyError(ctx, queue.ID, players, "wildcard cert unavailable")
 			return err
 		}
 		connInfo, err := server.S.Machines.CreateHost(ctx, cfg.HCLOUDHostType, cfg.HCLOUDAgentPort, tlsOpts)
 		if err != nil {
 			slog.Error("Failed to provision host VM", "error", err)
-			notifyError(ctx, gameID, players, "failed to provision server host")
+			notifyError(ctx, queue.ID, players, "failed to provision server host")
 			return err
 		}
 
@@ -201,7 +214,7 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 		if err != nil {
 			slog.Error("Failed to save host to DB; attempting VM cleanup", "error", err, "providerID", connInfo.ProviderID)
 			server.S.Machines.DeleteHost(context.Background(), connInfo.ProviderID)
-			notifyError(ctx, gameID, players, "internal error")
+			notifyError(ctx, queue.ID, players, "internal error")
 			return err
 		}
 
@@ -219,14 +232,14 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 	hostPorts, err := models.AllocatePorts(host.ID, len(gamePorts), cfg.HCLOUDPortRangeStart, cfg.HCLOUDPortRangeEnd)
 	if err != nil {
 		slog.Error("Failed to allocate ports", "error", err, "hostID", host.ID)
-		notifyError(ctx, gameID, players, "no ports available on server host")
+		notifyError(ctx, queue.ID, players, "no ports available on server host")
 		return err
 	}
 
 	authToken, err := hetzner.GenerateToken()
 	if err != nil {
 		models.FreePorts(host.ID, hostPorts)
-		notifyError(ctx, gameID, players, "internal error")
+		notifyError(ctx, queue.ID, players, "internal error")
 		return fmt.Errorf("generate auth token: %w", err)
 	}
 
@@ -237,7 +250,7 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 	spectateID := uuid.New().String()
 
 	containerID, err := hetzner.StartContainer(ctx, host.PublicIP, host.AgentPort, host.AgentToken, hetzner.ContainerConfig{
-		Image:      game.MatchmakingMachineName,
+		Image:      queue.MatchmakingMachineName,
 		GamePorts:  gamePorts,
 		HostPorts:  hostPorts,
 		Token:      authToken,
@@ -247,7 +260,7 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 	if err != nil {
 		slog.Error("Failed to start game container", "error", err, "hostID", host.ID)
 		models.FreePorts(host.ID, hostPorts)
-		notifyError(ctx, gameID, players, "failed to start game server: "+err.Error())
+		notifyError(ctx, queue.ID, players, "failed to start game server: "+err.Error())
 		return err
 	}
 
@@ -267,7 +280,7 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 		if spectateOverride != nil && !*spectateOverride {
 			spectateEnabled = false
 		}
-		match, err = models.MatchStarted(tx, gameID, si.ID, authToken, players, spectateEnabled)
+		match, err = models.MatchStarted(tx, game.ID, queue.ID, si.ID, authToken, players, spectateEnabled)
 		if err != nil {
 			return fmt.Errorf("create match: %w", err)
 		}
@@ -276,7 +289,7 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 		slog.Error("Failed to persist server instance/match", "error", err)
 		hetzner.StopContainer(context.Background(), host.PublicIP, host.AgentPort, host.AgentToken, containerID, spectateID)
 		models.FreePorts(host.ID, hostPorts)
-		notifyError(ctx, gameID, players, "internal error")
+		notifyError(ctx, queue.ID, players, "internal error")
 		return err
 	}
 
@@ -285,7 +298,7 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 	spectator.Start(match, host, spectateID)
 
 	for _, player := range players {
-		server.S.Redis.PublishMatchReady(ctx, gameID, player, "match_"+match.ID)
+		server.S.Redis.PublishMatchReady(ctx, queue.ID, player, "match_"+match.ID)
 	}
 
 	return nil
@@ -293,7 +306,7 @@ func StartMatch(ctx context.Context, gameID string, game *models.Game, players [
 
 // PairPlayers walks every queue (including metadata-segmented sub-queues)
 // and pairs LobbySize players together, dispatching them via StartMatch.
-// Per-game MatchmakingStrategy selects between FIFO ("random") and
+// Per-queue MatchmakingStrategy selects between FIFO ("random") and
 // rating-window pairing ("rating").
 func PairPlayers(ctx context.Context) error {
 	keys, err := server.S.Redis.AllQueues(ctx)
@@ -310,27 +323,32 @@ func PairPlayers(ctx context.Context) error {
 	}()
 
 	for _, key := range keys {
-		queueID := strings.TrimPrefix(key, "queue_")
-		gameID := extRedis.ParseQueueKey(queueID)
+		composite := strings.TrimPrefix(key, "queue_")
+		gameQueueID := extRedis.ParseQueueKey(composite)
 
-		game, err := models.GetGame(gameID)
+		queue, err := models.GetGameQueue(gameQueueID)
 		if err != nil {
-			slog.Warn("Game not found", "error", err, "gameID", gameID)
+			slog.Warn("GameQueue not found", "error", err, "gameQueueID", gameQueueID)
+			continue
+		}
+		game, err := models.GetGame(queue.GameID)
+		if err != nil {
+			slog.Warn("Game not found", "error", err, "gameID", queue.GameID)
 			continue
 		}
 
-		qs, err := server.S.Redis.GameQueueSize(ctx, queueID)
+		qs, err := server.S.Redis.GameQueueSize(ctx, composite)
 		if err != nil {
-			slog.Error("Failed to get queue size", "error", err, "queueID", queueID)
+			slog.Error("Failed to get queue size", "error", err, "composite", composite)
 			continue
 		}
-		slog.Debug("Pairing players", "queueID", queueID, "queueSize", qs, "strategy", game.MatchmakingStrategy)
+		slog.Debug("Pairing players", "composite", composite, "queueSize", qs, "strategy", queue.MatchmakingStrategy)
 
 		var paired bool
-		if game.MatchmakingStrategy == models.MATCHMAKING_STRATEGY_RATING {
-			paired = pairByRating(ctx, queueID, gameID, game)
+		if queue.MatchmakingStrategy == models.MATCHMAKING_STRATEGY_RATING {
+			paired = pairByRating(ctx, composite, game, queue)
 		} else {
-			paired = pairFIFO(ctx, queueID, gameID, game)
+			paired = pairFIFO(ctx, composite, game, queue)
 		}
 		if paired {
 			playerPaired = true
@@ -342,22 +360,22 @@ func PairPlayers(ctx context.Context) error {
 
 // pairFIFO is the original first-in-first-out pairing: pop LobbySize
 // players from the front of the queue and dispatch.
-func pairFIFO(ctx context.Context, queueID, gameID string, game *models.Game) bool {
+func pairFIFO(ctx context.Context, composite string, game *models.Game, queue *models.GameQueue) bool {
 	paired := false
-	for queueSize, err := server.S.Redis.GameQueueSize(ctx, queueID); err == nil && queueSize >= int64(game.LobbySize); queueSize, err = server.S.Redis.GameQueueSize(ctx, queueID) {
-		players, err := server.S.Redis.PopPlayersFromQueue(ctx, queueID, game.LobbySize)
+	for queueSize, err := server.S.Redis.GameQueueSize(ctx, composite); err == nil && queueSize >= int64(queue.LobbySize); queueSize, err = server.S.Redis.GameQueueSize(ctx, composite) {
+		players, err := server.S.Redis.PopPlayersFromQueue(ctx, composite, queue.LobbySize)
 		if err != nil {
-			slog.Error("Failed to pop players from queue", "error", err, "queueID", queueID)
+			slog.Error("Failed to pop players from queue", "error", err, "composite", composite)
 			break
 		}
 
-		if len(players) < game.LobbySize {
-			server.S.Redis.PushPlayersToQueue(ctx, queueID, players)
-			slog.Info("Not enough players, putting them back in queue", "queueID", queueID, "players", players)
+		if len(players) < queue.LobbySize {
+			server.S.Redis.PushPlayersToQueue(ctx, composite, players)
+			slog.Info("Not enough players, putting them back in queue", "composite", composite, "players", players)
 			break
 		}
 
-		if err := StartMatch(ctx, gameID, game, players, nil); err != nil {
+		if err := StartMatch(ctx, game, queue, composite, players, nil); err != nil {
 			continue
 		}
 		paired = true
@@ -384,26 +402,26 @@ func ratingWindow(waited time.Duration) int {
 // LobbySize-1 closest-rated others form the candidate group, which is
 // accepted only if max-min rating <= seed's window. Players that don't
 // fit are deferred to the next pass, where their window will be larger.
-func pairByRating(ctx context.Context, queueID, gameID string, game *models.Game) bool {
+func pairByRating(ctx context.Context, composite string, game *models.Game, queue *models.GameQueue) bool {
 	paired := false
 	for {
-		ids, err := server.S.Redis.AllPlayersInQueue(ctx, queueID)
+		ids, err := server.S.Redis.AllPlayersInQueue(ctx, composite)
 		if err != nil {
-			slog.Error("Failed to read queue for rating MM", "error", err, "queueID", queueID)
+			slog.Error("Failed to read queue for rating MM", "error", err, "composite", composite)
 			return paired
 		}
-		if len(ids) < game.LobbySize {
+		if len(ids) < queue.LobbySize {
 			return paired
 		}
 
-		joinTimes, err := server.S.Redis.QueueJoinTimes(ctx, queueID)
+		joinTimes, err := server.S.Redis.QueueJoinTimes(ctx, composite)
 		if err != nil {
-			slog.Error("Failed to read queue join times", "error", err, "queueID", queueID)
+			slog.Error("Failed to read queue join times", "error", err, "composite", composite)
 			return paired
 		}
-		ratings, err := models.GetRatingsForPlayers(gameID, ids)
+		ratings, err := models.GetRatingsForPlayers(queue.ID, ids)
 		if err != nil {
-			slog.Error("Failed to read player ratings", "error", err, "gameID", gameID)
+			slog.Error("Failed to read player ratings", "error", err, "gameQueueID", queue.ID)
 			return paired
 		}
 
@@ -417,7 +435,7 @@ func pairByRating(ctx context.Context, queueID, gameID string, game *models.Game
 		for _, id := range ids {
 			r, ok := ratings[id]
 			if !ok {
-				r = game.DefaultRating
+				r = queue.DefaultRating
 			}
 			var waited time.Duration
 			if ts, ok := joinTimes[id]; ok {
@@ -442,7 +460,7 @@ func pairByRating(ctx context.Context, queueID, gameID string, game *models.Game
 		sort.Slice(others, func(i, j int) bool {
 			return abs(others[i].rating-seed.rating) < abs(others[j].rating-seed.rating)
 		})
-		group := append([]cand{seed}, others[:game.LobbySize-1]...)
+		group := append([]cand{seed}, others[:queue.LobbySize-1]...)
 
 		minR, maxR := group[0].rating, group[0].rating
 		for _, c := range group[1:] {
@@ -455,7 +473,7 @@ func pairByRating(ctx context.Context, queueID, gameID string, game *models.Game
 		}
 		if maxR-minR > window {
 			slog.Debug("No group within rating window; deferring",
-				"queueID", queueID, "seedWaited", seed.waited, "window", window, "spread", maxR-minR)
+				"composite", composite, "seedWaited", seed.waited, "window", window, "spread", maxR-minR)
 			return paired
 		}
 
@@ -463,11 +481,11 @@ func pairByRating(ctx context.Context, queueID, gameID string, game *models.Game
 		for i, c := range group {
 			groupIDs[i] = c.id
 		}
-		if err := server.S.Redis.RemovePlayersFromQueue(ctx, queueID, groupIDs); err != nil {
-			slog.Error("Failed to remove paired players from queue", "error", err, "queueID", queueID)
+		if err := server.S.Redis.RemovePlayersFromQueue(ctx, composite, groupIDs); err != nil {
+			slog.Error("Failed to remove paired players from queue", "error", err, "composite", composite)
 			return paired
 		}
-		if err := StartMatch(ctx, gameID, game, groupIDs, nil); err != nil {
+		if err := StartMatch(ctx, game, queue, composite, groupIDs, nil); err != nil {
 			// StartMatch already pushed players back on capacity errors;
 			// other errors leave them out (they'll re-queue or time out).
 			continue

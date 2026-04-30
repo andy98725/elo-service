@@ -2,12 +2,10 @@ package models
 
 import (
 	"errors"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/andy98725/elo-service/src/server"
-	"github.com/lib/pq"
+	"gorm.io/gorm"
 )
 
 const (
@@ -24,6 +22,10 @@ var MATCHMAKING_STRATEGIES = []string{MATCHMAKING_STRATEGY_RANDOM, MATCHMAKING_S
 var ErrNotGameOwner = errors.New("not the owner of this game")
 var ELO_STRATEGIES = []string{ELO_STRATEGY_UNRANKED, ELO_STRATEGY_CLASSIC}
 
+// Game holds identity and game-wide policy. Per-pool matchmaking knobs
+// (image, ports, lobby size, ELO strategy, etc.) live on GameQueue —
+// one Game has 1..N queues. The default queue is queues[0] (oldest by
+// created_at, id), used when API callers don't specify a queueID.
 type Game struct {
 	ID          string    `json:"id" gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	OwnerID     string    `json:"owner_id" gorm:"not null"`
@@ -32,177 +34,181 @@ type Game struct {
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at" gorm:"not null;default:CURRENT_TIMESTAMP"`
 
-	// TODO separate into leaderboard if needed
-	// `default:true` tags are deliberately omitted from these three
-	// bools (GuestsAllowed, LobbyEnabled, PublicResults). GORM's INSERT
-	// path treats `default:` tagged fields as "use DB default if Go
-	// zero value" — which silently flips an explicit `false` from the
-	// caller to `true`. Defaults are enforced in CreateGame instead, so
-	// the model carries the value the caller asked for.
-	GuestsAllowed          bool   `json:"guests_allowed"`
-	LobbyEnabled           bool   `json:"lobby_enabled"`
-	LobbySize              int    `json:"lobby_size" gorm:"default:2"`
-	MatchmakingStrategy    string `json:"matchmaking_strategy" gorm:"not null;default:'random'"`
-	MatchmakingMachineName string `json:"matchmaking_machine_name" gorm:"not null"`
-	// MatchmakingSnapshotName string        `json:"matchmaking_snapshot_name" gorm:""`
-	MatchmakingMachinePorts pq.Int64Array `json:"matchmaking_machine_ports" gorm:"type:integer[];default:'{}'"`
-	ELOStrategy             string        `json:"elo_strategy" gorm:"not null;default:'unranked'"`
-	DefaultRating           int           `json:"default_rating" gorm:"default:1000"`
-	KFactor                 int           `json:"k_factor" gorm:"default:32"`
-	PublicResults           bool          `json:"public_results"`
-	PublicMatchLogs         bool          `json:"public_match_logs" gorm:"default:false"`
-	MetadataEnabled         bool          `json:"metadata_enabled" gorm:"default:false"`
+	// Game-wide policy knobs. Defaults are enforced in CreateGame, not via
+	// `default:true` GORM tags — see the explanation on those fields and
+	// the same trap on GameQueue.
+	GuestsAllowed   bool `json:"guests_allowed"`
+	PublicResults   bool `json:"public_results"`
+	PublicMatchLogs bool `json:"public_match_logs" gorm:"default:false"`
 	// SpectateEnabled lets non-participants discover live matches in this
 	// game and tail the per-match spectator stream. Opt-in (default false).
 	// Distinct from PublicMatchLogs, which is post-game container stdout —
 	// the spectator stream is its own pipe written by the game server to
 	// /shared/spectate.stream and uploaded as chunked S3 objects.
 	SpectateEnabled bool `json:"spectate_enabled" gorm:"default:false"`
+
+	// Queues is the ordered list of matchmaking pools for this game.
+	// Always non-empty after creation: CreateGame inserts a primary queue
+	// in the same transaction. Order is created_at ASC (id tiebreaker),
+	// so Queues[0] is the default queue.
+	Queues []GameQueue `json:"queues" gorm:"foreignKey:GameID;constraint:OnDelete:CASCADE"`
 }
 
+// GameResp serializes a game with its queues. The legacy flat queue
+// fields (lobby_size, matchmaking_machine_name, etc.) are populated from
+// the default queue (Queues[0]) for backwards compat with existing
+// clients — multi-queue clients should iterate `queues` directly.
 type GameResp struct {
-	ID                      string   `json:"id"`
-	Owner                   UserResp `json:"owner"`
-	Name                    string   `json:"name"`
-	Description             string   `json:"description"`
-	GuestsAllowed           bool     `json:"guests_allowed"`
-	LobbyEnabled            bool     `json:"lobby_enabled"`
-	LobbySize               int      `json:"lobby_size"`
-	MatchmakingStrategy     string   `json:"matchmaking_strategy"`
-	MatchmakingMachineName  string   `json:"matchmaking_machine_name"`
-	MatchmakingMachinePorts []int64  `json:"matchmaking_machine_ports"`
-	ELOStrategy             string   `json:"elo_strategy"`
-	KFactor                 int      `json:"k_factor"`
-	MetadataEnabled         bool     `json:"metadata_enabled"`
-	PublicResults           bool     `json:"public_results"`
-	PublicMatchLogs         bool     `json:"public_match_logs"`
-	SpectateEnabled         bool     `json:"spectate_enabled"`
+	ID              string          `json:"id"`
+	Owner           UserResp        `json:"owner"`
+	Name            string          `json:"name"`
+	Description     string          `json:"description"`
+	GuestsAllowed   bool            `json:"guests_allowed"`
+	PublicResults   bool            `json:"public_results"`
+	PublicMatchLogs bool            `json:"public_match_logs"`
+	SpectateEnabled bool            `json:"spectate_enabled"`
+	Queues          []GameQueueResp `json:"queues"`
+
+	// Legacy flat queue fields, mirrored from Queues[0]. Empty/zero
+	// when the game has no queues (transient state during creation).
+	LobbyEnabled            bool    `json:"lobby_enabled"`
+	LobbySize               int     `json:"lobby_size"`
+	MatchmakingStrategy     string  `json:"matchmaking_strategy"`
+	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
+	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
+	ELOStrategy             string  `json:"elo_strategy"`
+	DefaultRating           int     `json:"default_rating"`
+	KFactor                 int     `json:"k_factor"`
+	MetadataEnabled         bool    `json:"metadata_enabled"`
 }
 
-func (u *Game) ToResp() *GameResp {
-	return &GameResp{
-		ID:                      u.ID,
-		Owner:                   *u.Owner.ToResp(),
-		Name:                    u.Name,
-		Description:             u.Description,
-		GuestsAllowed:           u.GuestsAllowed,
-		LobbyEnabled:            u.LobbyEnabled,
-		LobbySize:               u.LobbySize,
-		MatchmakingStrategy:     u.MatchmakingStrategy,
-		MatchmakingMachineName:  u.MatchmakingMachineName,
-		MatchmakingMachinePorts: []int64(u.MatchmakingMachinePorts),
-		ELOStrategy:             u.ELOStrategy,
-		KFactor:                 u.KFactor,
-		MetadataEnabled:         u.MetadataEnabled,
-		PublicResults:           u.PublicResults,
-		PublicMatchLogs:         u.PublicMatchLogs,
-		SpectateEnabled:         u.SpectateEnabled,
+func (g *Game) ToResp() *GameResp {
+	queues := make([]GameQueueResp, len(g.Queues))
+	for i, q := range g.Queues {
+		queues[i] = *q.ToResp()
 	}
+	resp := &GameResp{
+		ID:              g.ID,
+		Owner:           *g.Owner.ToResp(),
+		Name:            g.Name,
+		Description:     g.Description,
+		GuestsAllowed:   g.GuestsAllowed,
+		PublicResults:   g.PublicResults,
+		PublicMatchLogs: g.PublicMatchLogs,
+		SpectateEnabled: g.SpectateEnabled,
+		Queues:          queues,
+	}
+	if len(queues) > 0 {
+		d := queues[0]
+		resp.LobbyEnabled = d.LobbyEnabled
+		resp.LobbySize = d.LobbySize
+		resp.MatchmakingStrategy = d.MatchmakingStrategy
+		resp.MatchmakingMachineName = d.MatchmakingMachineName
+		resp.MatchmakingMachinePorts = d.MatchmakingMachinePorts
+		resp.ELOStrategy = d.ELOStrategy
+		resp.DefaultRating = d.DefaultRating
+		resp.KFactor = d.KFactor
+		resp.MetadataEnabled = d.MetadataEnabled
+	}
+	return resp
 }
 
+// CreateGameParams bundles game-level fields and the parameters for the
+// primary queue created alongside the game. Existing API clients pass the
+// queue fields flat (lobby_size, matchmaking_machine_name, etc.) — the
+// handler folds those into Queue before calling CreateGame.
 type CreateGameParams struct {
-	Name                    string
-	Description             string
-	GuestsAllowed           *bool
-	PublicResults           *bool
-	LobbyEnabled            *bool
-	LobbySize               int
-	MatchmakingStrategy     string
-	MatchmakingMachineName  string
-	MatchmakingMachinePorts []int64
-	ELOStrategy             string
-	KFactor                 int
-	PublicMatchLogs         *bool
-	MetadataEnabled         bool
-	SpectateEnabled         *bool
+	Name            string
+	Description     string
+	GuestsAllowed   *bool
+	PublicResults   *bool
+	PublicMatchLogs *bool
+	SpectateEnabled *bool
+
+	// PrimaryQueue holds the matchmaking config for the auto-created
+	// default queue. The handler is expected to populate this from the
+	// flat queue-field payload submitted by existing clients.
+	PrimaryQueue CreateGameQueueParams
 }
 
+// CreateGame inserts the Game and its primary queue in a single transaction.
+// The primary queue is named "primary" by default and seeded with whatever
+// matchmaking config the caller passed via params.PrimaryQueue.
 func CreateGame(params CreateGameParams, owner User) (*Game, error) {
-	if params.MatchmakingMachineName == "" {
-		params.MatchmakingMachineName = "docker.io/andy98725/example-server:latest"
-	}
-	if params.MatchmakingStrategy == "" {
-		params.MatchmakingStrategy = MATCHMAKING_STRATEGY_RANDOM
-	}
-	if !slices.Contains(MATCHMAKING_STRATEGIES, params.MatchmakingStrategy) {
-		return nil, errors.New("invalid matchmaking strategy: " + params.MatchmakingStrategy + " must be one of " + strings.Join(MATCHMAKING_STRATEGIES, ", "))
-	}
-	if params.ELOStrategy == "" {
-		params.ELOStrategy = ELO_STRATEGY_UNRANKED
-	}
-	if !slices.Contains(ELO_STRATEGIES, params.ELOStrategy) {
-		return nil, errors.New("invalid elo strategy: " + params.ELOStrategy + " must be one of " + strings.Join(ELO_STRATEGIES, ", "))
-	}
-	if params.KFactor == 0 {
-		params.KFactor = 32
-	}
-
-	lobbyEnabled := true
-	if params.LobbyEnabled != nil {
-		lobbyEnabled = *params.LobbyEnabled
+	if err := applyQueueDefaults(&params.PrimaryQueue); err != nil {
+		return nil, err
 	}
 
 	guestsAllowed := true
 	if params.GuestsAllowed != nil {
 		guestsAllowed = *params.GuestsAllowed
 	}
-
 	publicResults := true
 	if params.PublicResults != nil {
 		publicResults = *params.PublicResults
 	}
-
 	publicMatchLogs := false
 	if params.PublicMatchLogs != nil {
 		publicMatchLogs = *params.PublicMatchLogs
 	}
-
 	spectateEnabled := false
 	if params.SpectateEnabled != nil {
 		spectateEnabled = *params.SpectateEnabled
 	}
 
 	game := &Game{
-		OwnerID:                 owner.ID,
-		Owner:                   owner,
-		Name:                    params.Name,
-		Description:             params.Description,
-		GuestsAllowed:           guestsAllowed,
-		PublicResults:           publicResults,
-		LobbyEnabled:            lobbyEnabled,
-		LobbySize:               params.LobbySize,
-		MatchmakingStrategy:     params.MatchmakingStrategy,
-		MatchmakingMachineName:  params.MatchmakingMachineName,
-		MatchmakingMachinePorts: pq.Int64Array(params.MatchmakingMachinePorts),
-		ELOStrategy:             params.ELOStrategy,
-		KFactor:                 params.KFactor,
-		PublicMatchLogs:         publicMatchLogs,
-		MetadataEnabled:         params.MetadataEnabled,
-		SpectateEnabled:         spectateEnabled,
+		OwnerID:         owner.ID,
+		Owner:           owner,
+		Name:            params.Name,
+		Description:     params.Description,
+		GuestsAllowed:   guestsAllowed,
+		PublicResults:   publicResults,
+		PublicMatchLogs: publicMatchLogs,
+		SpectateEnabled: spectateEnabled,
 	}
 
-	result := server.S.DB.Create(game)
-	if result.Error != nil {
-		return nil, result.Error
+	queue := queueFromParams(params.PrimaryQueue)
+
+	err := server.S.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(game).Error; err != nil {
+			return err
+		}
+		queue.GameID = game.ID
+		if err := tx.Create(queue).Error; err != nil {
+			return err
+		}
+		game.Queues = []GameQueue{*queue}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return game, nil
 }
 
+// gameQuery preloads queues in their canonical order (default = Queues[0]).
+func gameQuery() *gorm.DB {
+	return server.S.DB.Preload("Queues", func(db *gorm.DB) *gorm.DB {
+		return db.Order("created_at ASC, id ASC")
+	})
+}
+
 func GetGames(page, pageSize int) ([]Game, int, error) {
 	var games []Game
 	offset := page * pageSize
-	result := server.S.DB.Offset(offset).Limit(pageSize).Find(&games)
+	result := gameQuery().Offset(offset).Limit(pageSize).Find(&games)
 	nextPage := page + 1
 	if result.RowsAffected < int64(pageSize) {
 		nextPage = -1
 	}
 	return games, nextPage, result.Error
 }
+
 func GetGamesOfUser(page, pageSize int, userId string) ([]Game, int, error) {
 	var games []Game
 	offset := page * pageSize
-	result := server.S.DB.Offset(offset).Limit(pageSize).Where("owner_id = ?", userId).Find(&games)
+	result := gameQuery().Offset(offset).Limit(pageSize).Where("owner_id = ?", userId).Find(&games)
 	nextPage := page + 1
 	if result.RowsAffected < int64(pageSize) {
 		nextPage = -1
@@ -212,14 +218,24 @@ func GetGamesOfUser(page, pageSize int, userId string) ([]Game, int, error) {
 
 func GetGame(id string) (*Game, error) {
 	var game Game
-	result := server.S.DB.First(&game, "id = ?", id)
+	result := gameQuery().First(&game, "id = ?", id)
 	return &game, result.Error
 }
 
+// UpdateGameParams covers game-level fields plus the legacy flat queue
+// fields. Any non-zero queue field is applied to the default queue
+// (Queues[0]) — the same backwards-compat shim that lets existing
+// CreateGame clients keep working without code changes.
 type UpdateGameParams struct {
-	Name                    string  `json:"name"`
-	Description             string  `json:"description"`
-	GuestsAllowed           *bool   `json:"guests_allowed"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	GuestsAllowed   *bool  `json:"guests_allowed"`
+	PublicResults   *bool  `json:"public_results"`
+	PublicMatchLogs *bool  `json:"public_match_logs"`
+	SpectateEnabled *bool  `json:"spectate_enabled"`
+
+	// Legacy flat queue fields. Applied to the game's default queue.
+	// Multi-queue clients should hit /game/:id/queue/:queueID directly.
 	LobbyEnabled            *bool   `json:"lobby_enabled"`
 	LobbySize               int     `json:"lobby_size"`
 	MatchmakingStrategy     string  `json:"matchmaking_strategy"`
@@ -227,20 +243,41 @@ type UpdateGameParams struct {
 	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
 	ELOStrategy             string  `json:"elo_strategy"`
 	KFactor                 int     `json:"k_factor"`
-	PublicResults           *bool   `json:"public_results"`
-	PublicMatchLogs         *bool   `json:"public_match_logs"`
 	MetadataEnabled         *bool   `json:"metadata_enabled"`
-	SpectateEnabled         *bool   `json:"spectate_enabled"`
 }
 
-func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
-	if params.MatchmakingStrategy != "" && !slices.Contains(MATCHMAKING_STRATEGIES, params.MatchmakingStrategy) {
-		return nil, errors.New("invalid matchmaking strategy: " + params.MatchmakingStrategy + " must be one of " + strings.Join(MATCHMAKING_STRATEGIES, ", "))
-	}
-	if params.ELOStrategy != "" && !slices.Contains(ELO_STRATEGIES, params.ELOStrategy) {
-		return nil, errors.New("invalid elo strategy: " + params.ELOStrategy + " must be one of " + strings.Join(ELO_STRATEGIES, ", "))
-	}
+// hasQueueFieldUpdates reports whether any of the legacy flat queue
+// fields on UpdateGameParams were set.
+func (p *UpdateGameParams) hasQueueFieldUpdates() bool {
+	return p.LobbyEnabled != nil ||
+		p.LobbySize != 0 ||
+		p.MatchmakingStrategy != "" ||
+		p.MatchmakingMachineName != "" ||
+		p.MatchmakingMachinePorts != nil ||
+		p.ELOStrategy != "" ||
+		p.KFactor != 0 ||
+		p.MetadataEnabled != nil
+}
 
+// toQueueUpdate folds legacy flat queue fields into an
+// UpdateGameQueueParams suitable for applyQueueUpdate.
+func (p *UpdateGameParams) toQueueUpdate() UpdateGameQueueParams {
+	return UpdateGameQueueParams{
+		LobbyEnabled:            p.LobbyEnabled,
+		LobbySize:               p.LobbySize,
+		MatchmakingStrategy:     p.MatchmakingStrategy,
+		MatchmakingMachineName:  p.MatchmakingMachineName,
+		MatchmakingMachinePorts: p.MatchmakingMachinePorts,
+		ELOStrategy:             p.ELOStrategy,
+		KFactor:                 p.KFactor,
+		MetadataEnabled:         p.MetadataEnabled,
+	}
+}
+
+// UpdateGame applies game-level updates and, if any legacy queue fields
+// are set, applies them to the default queue (Queues[0]) in the same
+// transaction.
+func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
 	game, err := GetGame(id)
 	if err != nil {
 		return nil, err
@@ -258,57 +295,45 @@ func UpdateGame(id string, params UpdateGameParams, owner User) (*Game, error) {
 	if params.GuestsAllowed != nil {
 		game.GuestsAllowed = *params.GuestsAllowed
 	}
-	if params.LobbyEnabled != nil {
-		game.LobbyEnabled = *params.LobbyEnabled
-	}
-	if params.LobbySize != 0 {
-		game.LobbySize = params.LobbySize
-	}
-	if params.MatchmakingStrategy != "" {
-		game.MatchmakingStrategy = params.MatchmakingStrategy
-	}
-	if params.MatchmakingMachineName != "" {
-		game.MatchmakingMachineName = params.MatchmakingMachineName
-	}
-	if params.MatchmakingMachinePorts != nil {
-		game.MatchmakingMachinePorts = params.MatchmakingMachinePorts
-	}
-	if params.ELOStrategy != "" {
-		game.ELOStrategy = params.ELOStrategy
-	}
-	if params.KFactor != 0 {
-		game.KFactor = params.KFactor
-	}
 	if params.PublicResults != nil {
 		game.PublicResults = *params.PublicResults
 	}
 	if params.PublicMatchLogs != nil {
 		game.PublicMatchLogs = *params.PublicMatchLogs
 	}
-	if params.MetadataEnabled != nil {
-		game.MetadataEnabled = *params.MetadataEnabled
-	}
 	if params.SpectateEnabled != nil {
 		game.SpectateEnabled = *params.SpectateEnabled
 	}
 
-	result := server.S.DB.Save(game)
-	if result.Error != nil {
-		return nil, result.Error
+	err = server.S.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(game).Error; err != nil {
+			return err
+		}
+		if params.hasQueueFieldUpdates() {
+			if len(game.Queues) == 0 {
+				return errors.New("game has no queues to update")
+			}
+			defaultQueue := game.Queues[0]
+			qu := params.toQueueUpdate()
+			if err := applyQueueUpdate(&defaultQueue, qu); err != nil {
+				return err
+			}
+			if err := tx.Save(&defaultQueue).Error; err != nil {
+				return err
+			}
+			game.Queues[0] = defaultQueue
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return game, nil
 }
 
-// func SetGameSnapshot(id string, snapshotName string) error {
-// 	game, err := GetGame(id)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	game.MatchmakingSnapshotName = snapshotName
-// 	return server.S.DB.Save(game).Error
-// }
-
+// DeleteGame removes the game and cascades to its queues (and through
+// them, its ratings via game_queues → ratings ON DELETE CASCADE).
 func DeleteGame(id string, owner User) error {
 	game, err := GetGame(id)
 	if err != nil {

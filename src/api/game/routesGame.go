@@ -11,6 +11,12 @@ func InitRoutes(e *echo.Echo) error {
 	e.GET("/user/game", GetGamesOfUser, auth.RequireUserAuth)
 	e.PUT("/game/:id", UpdateGame, auth.RequireUserAuth)
 	e.DELETE("/game/:id", DeleteGame, auth.RequireUserAuth)
+	// Per-game queue CRUD (multi-queue support; game owner only for mutations).
+	e.POST("/game/:gameID/queue", CreateGameQueue, auth.RequireUserAuth)
+	e.GET("/game/:gameID/queue", ListGameQueues)
+	e.GET("/game/:gameID/queue/:queueID", GetGameQueue)
+	e.PUT("/game/:gameID/queue/:queueID", UpdateGameQueue, auth.RequireUserAuth)
+	e.DELETE("/game/:gameID/queue/:queueID", DeleteGameQueue, auth.RequireUserAuth)
 	// Admin
 	e.GET("/games", GetGames, auth.RequireAdmin)
 	// e.POST("/game/:id/snapshot", CreateGameSnapshot, auth.RequireAdmin)

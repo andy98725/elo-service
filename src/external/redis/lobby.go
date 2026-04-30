@@ -38,8 +38,13 @@ return 1
 `)
 
 type LobbyRecord struct {
-	ID           string    `json:"id"`
-	GameID       string    `json:"game_id"`
+	ID     string `json:"id"`
+	GameID string `json:"game_id"`
+	// GameQueueID identifies the matchmaking pool the lobby will start
+	// its match under (image, ports, lobby size, ELO settings). Set at
+	// /lobby/host time from the optional queueID query param; defaults
+	// to the game's primary queue.
+	GameQueueID  string    `json:"game_queue_id"`
 	HostID       string    `json:"host_id"`
 	HostName     string    `json:"host_name"`
 	Tags         []string  `json:"tags"`
@@ -82,6 +87,7 @@ func (r *Redis) CreateLobby(ctx context.Context, lobby *LobbyRecord) error {
 	pipe.HSet(ctx, lobbyKey(lobby.ID),
 		"id", lobby.ID,
 		"game_id", lobby.GameID,
+		"game_queue_id", lobby.GameQueueID,
 		"host_id", lobby.HostID,
 		"host_name", lobby.HostName,
 		"tags", string(tagsJSON),
@@ -122,6 +128,7 @@ func (r *Redis) GetLobby(ctx context.Context, lobbyID string) (*LobbyRecord, err
 	return &LobbyRecord{
 		ID:           fields["id"],
 		GameID:       fields["game_id"],
+		GameQueueID:  fields["game_queue_id"],
 		HostID:       fields["host_id"],
 		HostName:     fields["host_name"],
 		Tags:         tags,

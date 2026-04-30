@@ -189,11 +189,12 @@ func TestCleanupExpiredPlayers(t *testing.T) {
 	ownerToken, _ := LoginUser(t, h.BaseURL(), "gcowner@example.com", "pass")
 	game := CreateGame(t, h.BaseURL(), ownerToken, "GCGame", 2)
 	gameID := game["id"].(string)
+	queueID := DefaultQueueID(t, game)
 
 	guestToken, guestID := GuestLogin(t, h.BaseURL(), "expireguest")
 
 	ctx := context.Background()
-	server.S.Redis.AddPlayerToQueueWithTTL(ctx, gameID, guestID, 100*time.Millisecond)
+	server.S.Redis.AddPlayerToQueueWithTTL(ctx, queueID, guestID, 100*time.Millisecond)
 
 	size := QueueSize(t, h.BaseURL(), guestToken, gameID)
 	if size != 1 {
