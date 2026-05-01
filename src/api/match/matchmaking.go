@@ -173,6 +173,11 @@ func JoinQueueWebsocket(ctx echo.Context) error {
 				"server_host":  match.ServerInstance.MachineHost.PublicAddress(),
 				"server_ports": []int64(match.ServerInstance.HostPorts),
 				"match_id":     match.ID,
+				// connect_token is the credential the client presents to the
+				// game server when joining. Today it equals the player's id —
+				// the wire-compatible no-op shape that lets us land the API
+				// concept ahead of swapping the value to a generated secret.
+				"connect_token": id,
 			})
 			return nil
 		case <-peerGone:

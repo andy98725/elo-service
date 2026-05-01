@@ -24,10 +24,16 @@ type RequestBody struct {
 	WinnerID string `json:"winner_id"`
 }
 
+// expectedTokens / joinedTokens hold the per-match connect tokens the
+// matchmaker hands the game server in argv. Each value is the credential
+// a single player presents on /join (HTTP) or the first TCP line. Today
+// it equals the player's ID; phase 2 swaps it for an opaque secret. The
+// game server only needs to verify membership — the matchmaker is
+// authoritative on which tokens are admissible for this match.
 type GameServer struct {
 	tokenID         string
-	expectedPlayers map[string]bool
-	joinedPlayers   map[string]bool
+	expectedTokens  map[string]bool
+	joinedTokens    map[string]bool
 	mutex           sync.RWMutex
 	reportURL       string
 	artifactURL     string
@@ -44,44 +50,44 @@ func platformBase(reportURL string) string {
 	return reportURL
 }
 
-func NewGameServer(tokenID string, playerIDs []string) *GameServer {
+func NewGameServer(tokenID string, connectTokens []string) *GameServer {
 	reportURL := os.Getenv("WEBSITE_URL")
 	if reportURL == "" {
 		reportURL = "https://elo-service.fly.dev/result/report"
 	}
 
-	expectedPlayers := make(map[string]bool)
-	for _, playerID := range playerIDs {
-		expectedPlayers[playerID] = true
+	expectedTokens := make(map[string]bool)
+	for _, t := range connectTokens {
+		expectedTokens[t] = true
 	}
 
 	return &GameServer{
-		tokenID:         tokenID,
-		expectedPlayers: expectedPlayers,
-		joinedPlayers:   make(map[string]bool),
-		reportURL:       reportURL,
-		artifactURL:     platformBase(reportURL) + "/match/artifact",
-		shutdownChan:    make(chan struct{}),
+		tokenID:        tokenID,
+		expectedTokens: expectedTokens,
+		joinedTokens:   make(map[string]bool),
+		reportURL:      reportURL,
+		artifactURL:    platformBase(reportURL) + "/match/artifact",
+		shutdownChan:   make(chan struct{}),
 	}
 }
 
-func (gs *GameServer) addPlayer(playerID string) bool {
+func (gs *GameServer) addPlayer(connectToken string) bool {
 	gs.mutex.Lock()
 	defer gs.mutex.Unlock()
 
-	if !gs.expectedPlayers[playerID] {
-		return false // Player not expected
+	if !gs.expectedTokens[connectToken] {
+		return false // Token not expected
 	}
 
-	if gs.joinedPlayers[playerID] {
-		return false // Player already joined
+	if gs.joinedTokens[connectToken] {
+		return false // Already joined with this token
 	}
 
-	gs.joinedPlayers[playerID] = true
-	log.Printf("Player %s joined. Total players: %d/%d", playerID, len(gs.joinedPlayers), len(gs.expectedPlayers))
+	gs.joinedTokens[connectToken] = true
+	log.Printf("Player joined (token=%s). Total: %d/%d", connectToken, len(gs.joinedTokens), len(gs.expectedTokens))
 
 	// Check if all expected players have joined
-	if len(gs.joinedPlayers) >= len(gs.expectedPlayers) {
+	if len(gs.joinedTokens) >= len(gs.expectedTokens) {
 		log.Println("All players have joined! Starting game...")
 		go gs.reportResult()
 		return true
@@ -90,23 +96,23 @@ func (gs *GameServer) addPlayer(playerID string) bool {
 	return true
 }
 
-func (gs *GameServer) getPlayerList() []string {
+func (gs *GameServer) getJoinedTokens() []string {
 	gs.mutex.RLock()
 	defer gs.mutex.RUnlock()
 
-	players := make([]string, 0, len(gs.joinedPlayers))
-	for playerID := range gs.joinedPlayers {
-		players = append(players, playerID)
+	out := make([]string, 0, len(gs.joinedTokens))
+	for t := range gs.joinedTokens {
+		out = append(out, t)
 	}
-	return players
+	return out
 }
 
-func (gs *GameServer) getExpectedPlayerList() []string {
-	players := make([]string, 0, len(gs.expectedPlayers))
-	for playerID := range gs.expectedPlayers {
-		players = append(players, playerID)
+func (gs *GameServer) getExpectedTokens() []string {
+	out := make([]string, 0, len(gs.expectedTokens))
+	for t := range gs.expectedTokens {
+		out = append(out, t)
 	}
-	return players
+	return out
 }
 
 // uploadArtifact pushes a named binary artifact to the matchmaker. Used
@@ -137,13 +143,16 @@ func (gs *GameServer) uploadArtifact(name, contentType string, body []byte) int 
 }
 
 func (gs *GameServer) reportResult() {
-	players := gs.getPlayerList()
+	// In phase 1, connect_token == player_id, so a joined token is also
+	// a valid winner_id. Phase 2 will need an explicit (player_id,
+	// connect_token) pairing in argv to keep this mapping correct.
+	tokens := gs.getJoinedTokens()
 
-	log.Printf("Simulating game with %d players: %v", len(players), players)
+	log.Printf("Simulating game with %d players: %v", len(tokens), tokens)
 	time.Sleep(3 * time.Second)
 
 	// Randomly select winner
-	winnerID := players[rand.Intn(len(players))]
+	winnerID := tokens[rand.Intn(len(tokens))]
 	log.Printf("Game finished! Winner: %s", winnerID)
 
 	// Pre-result artifact upload — exercises the "during match" path
@@ -214,20 +223,20 @@ func (gs *GameServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	gs.mutex.RLock()
-	joinedCount := len(gs.joinedPlayers)
-	expectedCount := len(gs.expectedPlayers)
-	expectedPlayers := gs.getExpectedPlayerList()
-	joinedPlayers := gs.getPlayerList()
+	joinedCount := len(gs.joinedTokens)
+	expectedCount := len(gs.expectedTokens)
 	gs.mutex.RUnlock()
+	expectedTokens := gs.getExpectedTokens()
+	joinedTokens := gs.getJoinedTokens()
 
 	response := map[string]interface{}{
-		"status":           "healthy",
-		"token_id":         gs.tokenID,
-		"expected_players": expectedPlayers,
-		"joined_players":   joinedPlayers,
-		"player_count":     joinedCount,
-		"expected_count":   expectedCount,
-		"ready":            joinedCount >= expectedCount,
+		"status":          "healthy",
+		"token_id":        gs.tokenID,
+		"expected_tokens": expectedTokens,
+		"joined_tokens":   joinedTokens,
+		"player_count":    joinedCount,
+		"expected_count":  expectedCount,
+		"ready":           joinedCount >= expectedCount,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -247,24 +256,24 @@ func (gs *GameServer) handleHTTPJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	playerID := strings.TrimSpace(string(body))
-	if playerID == "" {
-		http.Error(w, "Player ID is required", http.StatusBadRequest)
+	connectToken := strings.TrimSpace(string(body))
+	if connectToken == "" {
+		http.Error(w, "Connect token is required", http.StatusBadRequest)
 		return
 	}
 
-	if !gs.expectedPlayers[playerID] {
-		http.Error(w, fmt.Sprintf("Player %s not expected in this game", playerID), http.StatusForbidden)
+	if !gs.expectedTokens[connectToken] {
+		http.Error(w, "Connect token not expected in this game", http.StatusForbidden)
 		return
 	}
 
-	if gs.addPlayer(playerID) {
+	if gs.addPlayer(connectToken) {
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, "Player %s joined successfully. Players: %d/%d",
-			playerID, len(gs.getPlayerList()), len(gs.expectedPlayers))
+		fmt.Fprintf(w, "Joined successfully. Players: %d/%d",
+			len(gs.getJoinedTokens()), len(gs.expectedTokens))
 	} else {
-		http.Error(w, "Player already joined", http.StatusConflict)
+		http.Error(w, "Already joined", http.StatusConflict)
 	}
 }
 
@@ -273,29 +282,29 @@ func (gs *GameServer) handleTCPConnection(conn net.Conn) {
 	defer conn.Close()
 
 	reader := bufio.NewReader(conn)
-	playerID, err := reader.ReadString('\n')
+	connectToken, err := reader.ReadString('\n')
 	if err != nil {
 		log.Printf("Failed to read from TCP connection: %v", err)
 		return
 	}
 
-	playerID = strings.TrimSpace(playerID)
-	if playerID == "" {
-		conn.Write([]byte("ERROR: Player ID is required\n"))
+	connectToken = strings.TrimSpace(connectToken)
+	if connectToken == "" {
+		conn.Write([]byte("ERROR: Connect token is required\n"))
 		return
 	}
 
-	if !gs.expectedPlayers[playerID] {
-		conn.Write([]byte("ERROR: Player not expected in this game\n"))
+	if !gs.expectedTokens[connectToken] {
+		conn.Write([]byte("ERROR: Connect token not expected in this game\n"))
 		return
 	}
 
-	if gs.addPlayer(playerID) {
-		response := fmt.Sprintf("OK: Player %s joined successfully. Players: %d/%d\n",
-			playerID, len(gs.getPlayerList()), len(gs.expectedPlayers))
+	if gs.addPlayer(connectToken) {
+		response := fmt.Sprintf("OK: Joined successfully. Players: %d/%d\n",
+			len(gs.getJoinedTokens()), len(gs.expectedTokens))
 		conn.Write([]byte(response))
 	} else {
-		conn.Write([]byte("ERROR: Player already joined\n"))
+		conn.Write([]byte("ERROR: Already joined\n"))
 	}
 }
 
@@ -304,27 +313,30 @@ func main() {
 	var httpPort int
 	var tcpPort int
 
-	flag.StringVar(&tokenID, "token", "", "Token ID (required)")
+	flag.StringVar(&tokenID, "token", "", "Match auth token used for /result/report (required)")
 	flag.IntVar(&httpPort, "http-port", 8080, "HTTP server port")
 	flag.IntVar(&tcpPort, "tcp-port", 8081, "TCP server port")
 	flag.Parse()
 
-	playerIDs := flag.Args() // Player IDs are remaining arguments
+	// Positional args are the per-player connect tokens — the credentials
+	// each client presents on /join. In phase 1 these equal the players'
+	// IDs; phase 2 will swap them for opaque generated secrets.
+	connectTokens := flag.Args()
 
 	if tokenID == "" {
-		log.Fatal("Token ID is required. Use -token flag.")
+		log.Fatal("Match auth token is required. Use -token flag.")
 	}
 
-	if len(playerIDs) == 0 {
-		log.Fatal("At least one player ID is required.")
+	if len(connectTokens) == 0 {
+		log.Fatal("At least one connect token is required.")
 	}
 
 	// Initialize game server
-	gameServer := NewGameServer(tokenID, playerIDs)
+	gameServer := NewGameServer(tokenID, connectTokens)
 
 	log.Printf("Starting example game server:")
 	log.Printf("  Token ID: %s", tokenID)
-	log.Printf("  Expected players: %v", gameServer.getExpectedPlayerList())
+	log.Printf("  Expected connect tokens: %v", gameServer.getExpectedTokens())
 	log.Printf("  HTTP port: %d", httpPort)
 	log.Printf("  TCP port: %d", tcpPort)
 

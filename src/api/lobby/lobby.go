@@ -332,7 +332,7 @@ func runLobbySession(
 			if !ok {
 				return
 			}
-			handleMatchReady(ctx, conn, ready.Payload)
+			handleMatchReady(ctx, conn, playerID, ready.Payload)
 			return
 		case text := <-inbound:
 			if text == "" {
@@ -444,7 +444,7 @@ func runHostCommand(ctx context.Context, rec *redis.LobbyRecord, game *models.Ga
 
 // handleMatchReady mirrors the post-match-found path in matchmaking.go so
 // existing clients can share the same handshake after either flow.
-func handleMatchReady(ctx echo.Context, conn *websocket.Conn, payload string) {
+func handleMatchReady(ctx echo.Context, conn *websocket.Conn, playerID, payload string) {
 	if strings.HasPrefix(payload, "error:") {
 		conn.WriteJSON(echo.Map{"status": "error", "error": strings.TrimPrefix(payload, "error:")})
 		return
@@ -477,13 +477,16 @@ func handleMatchReady(ctx echo.Context, conn *websocket.Conn, payload string) {
 		return
 	}
 	// Match the matchmaking flow's wire format: server_host + server_ports +
-	// match_id, no auth_code (player IDs are the join key on the game server).
-	// Hostname preferred over IP when wildcard TLS is enabled.
+	// match_id + connect_token (the join credential the receiving player
+	// presents to the game server). Hostname preferred over IP when wildcard
+	// TLS is enabled. connect_token = playerID for now; phase 2 swaps it for
+	// a per-(match, player) generated secret.
 	conn.WriteJSON(echo.Map{
-		"status":       "match_found",
-		"server_host":  match.ServerInstance.MachineHost.PublicAddress(),
-		"server_ports": []int64(match.ServerInstance.HostPorts),
-		"match_id":     match.ID,
+		"status":        "match_found",
+		"server_host":   match.ServerInstance.MachineHost.PublicAddress(),
+		"server_ports":  []int64(match.ServerInstance.HostPorts),
+		"match_id":      match.ID,
+		"connect_token": playerID,
 	})
 }
 

@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-var exampleGameID = "b2b8f32d-763e-4a63-b1ec-121a65e376f2"
-
 // TestMatchReportsResult drives a full happy-path match: two guests
 // queue against the example game, the matchmaker pairs them and spawns
 // a container, both guests /join the container (which triggers the
@@ -27,64 +25,40 @@ func TestMatchReportsResult(t *testing.T) {
 	g2Token, g2ID := LoginGuest(t, *baseURL, "guest2")
 	t.Logf("Guest 1: %s, Guest 2: %s", g1ID, g2ID)
 
-	// Sanity: queue should be empty. If a prior failed run left players
-	// behind they'll TTL out after 2 min — re-run later if this fires.
-	queueResponse := DoReq(t, "GET",
-		fmt.Sprintf("%s/match/size?gameID=%s", *baseURL, exampleGameID),
-		nil, g1Token, http.StatusOK)
-	if queueResponse["players_in_queue"].(float64) != 0 {
-		t.Fatalf("expected empty queue, got %v (stale entries from a prior run? wait 2 min for TTL)",
-			queueResponse["players_in_queue"])
-	}
+	AssertQueueEmpty(t, *baseURL, exampleGameID, g1Token)
 
 	connectionStart := time.Now()
-	ws1 := WebsocketConnect(t,
-		fmt.Sprintf("%s/match/join?gameID=%s", *baseURL, exampleGameID), g1Token)
+	mf, ws1, ws2 := PairTwoGuests(t, *baseURL, exampleGameID, "ws1", "ws2", g1Token, g2Token)
 	defer ws1.Close()
-	ws2 := WebsocketConnect(t,
-		fmt.Sprintf("%s/match/join?gameID=%s", *baseURL, exampleGameID), g2Token)
 	defer ws2.Close()
-
-	found := make(chan MatchFound, 2)
-	go func() { found <- AwaitMatchFound(t, ws1, "ws1") }()
-	go func() { found <- AwaitMatchFound(t, ws2, "ws2") }()
-	m1 := <-found
-	m2 := <-found
-	if m1.MatchID != m2.MatchID {
-		t.Fatalf("expected same match_id on both sockets, got %s and %s", m1.MatchID, m2.MatchID)
-	}
 	t.Logf("Both guests matched on %s:%d after %s",
-		m1.ServerHost, m1.ServerPorts[0], time.Since(connectionStart))
+		mf.ServerHost, mf.ServerPorts[0], time.Since(connectionStart))
 
 	// Both /join the container. The example server will then simulate a
 	// 3s game and POST /result/report on its own.
-	JoinContainer(t, m1, g1ID)
-	JoinContainer(t, m1, g2ID)
+	JoinContainer(t, mf, g1ID)
+	JoinContainer(t, mf, g2ID)
 	t.Logf("Both players joined container")
 
 	// Poll /user/results until the example server's /result/report has
 	// landed. Phase A only — the result row exists immediately on report.
 	resultsURL := fmt.Sprintf("%s/user/results", *baseURL)
-	deadline := time.Now().Add(60 * time.Second)
 	var matchResultID string
-	for {
+	PollUntil(t, "match result on /user/results", 60*time.Second, 2*time.Second, func() bool {
 		gameResults := DoReq(t, "GET", resultsURL, nil, g1Token, http.StatusOK)
 		results, _ := gameResults["matchResults"].([]interface{})
-		if len(results) > 0 {
-			result := results[0].(map[string]interface{})
-			matchResultID = result["id"].(string)
-			t.Logf("Match result appeared: id=%s", matchResultID)
-			break
+		if len(results) == 0 {
+			return false
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("no match result after 60s — example server may not have reported")
-		}
-		time.Sleep(2 * time.Second)
-	}
+		result := results[0].(map[string]interface{})
+		matchResultID = result["id"].(string)
+		t.Logf("Match result appeared: id=%s", matchResultID)
+		return true
+	})
 
 	// Result must reference the match we just played.
-	if matchResultID != m1.MatchID {
-		t.Fatalf("match_result id mismatch: got %s, expected %s", matchResultID, m1.MatchID)
+	if matchResultID != mf.MatchID {
+		t.Fatalf("match_result id mismatch: got %s, expected %s", matchResultID, mf.MatchID)
 	}
 }
 
@@ -103,59 +77,32 @@ func TestMatchLogsAvailableAfterCooldown(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow cooldown test in -short mode")
 	}
+	if *adminToken == "" {
+		t.Skip("skipping: /results/{id}/logs is owner/admin-only — pass -admin-token <jwt> to run")
+	}
 
 	g1Token, g1ID := LoginGuest(t, *baseURL, "logsguest1")
 	g2Token, g2ID := LoginGuest(t, *baseURL, "logsguest2")
 
-	ws1 := WebsocketConnect(t,
-		fmt.Sprintf("%s/match/join?gameID=%s", *baseURL, exampleGameID), g1Token)
+	mf, ws1, ws2 := PairTwoGuests(t, *baseURL, exampleGameID, "ws1", "ws2", g1Token, g2Token)
 	defer ws1.Close()
-	ws2 := WebsocketConnect(t,
-		fmt.Sprintf("%s/match/join?gameID=%s", *baseURL, exampleGameID), g2Token)
 	defer ws2.Close()
 
-	found := make(chan MatchFound, 2)
-	go func() { found <- AwaitMatchFound(t, ws1, "ws1") }()
-	go func() { found <- AwaitMatchFound(t, ws2, "ws2") }()
-	m1 := <-found
-	m2 := <-found
-	if m1.MatchID != m2.MatchID {
-		t.Fatalf("expected same match_id, got %s and %s", m1.MatchID, m2.MatchID)
-	}
-	JoinContainer(t, m1, g1ID)
-	JoinContainer(t, m1, g2ID)
+	JoinContainer(t, mf, g1ID)
+	JoinContainer(t, mf, g2ID)
 
 	// Wait for /result/report (Phase A).
-	resultURL := fmt.Sprintf("%s/results/%s", *baseURL, m1.MatchID)
-	resultDeadline := time.Now().Add(60 * time.Second)
-	for {
-		req, _ := http.NewRequest("GET", resultURL, nil)
-		req.Header.Set("Authorization", "Bearer "+g1Token)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatalf("results poll: %v", err)
-		}
-		status := resp.StatusCode
-		resp.Body.Close()
-		if status == http.StatusOK {
-			break
-		}
-		if time.Now().After(resultDeadline) {
-			t.Fatalf("no MatchResult after 60s (last status %d)", status)
-		}
-		time.Sleep(2 * time.Second)
-	}
+	WaitForMatchResult(t, *baseURL, mf.MatchID, g1Token, 60*time.Second)
 	t.Logf("MatchResult exists — Phase A done. Polling logs (Phase B, ~5+ min)…")
 
 	// Phase B: poll /results/{id}/logs. Returns 404 until the cooldown
 	// sweep populates LogsKey on the MatchResult row. Production
 	// MATCH_GC_INTERVAL is ~1 min and MatchCooldownDuration is ~5 min;
 	// 7 min is comfortably past the upper bound.
-	logsURL := fmt.Sprintf("%s/results/%s/logs", *baseURL, m1.MatchID)
-	deadline := time.Now().Add(7 * time.Minute)
-	for {
+	logsURL := fmt.Sprintf("%s/results/%s/logs", *baseURL, mf.MatchID)
+	PollUntil(t, "logs available", 7*time.Minute, 15*time.Second, func() bool {
 		req, _ := http.NewRequest("GET", logsURL, nil)
-		req.Header.Set("Authorization", "Bearer "+g1Token)
+		req.Header.Set("Authorization", "Bearer "+*adminToken)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("logs request: %v", err)
@@ -163,15 +110,14 @@ func TestMatchLogsAvailableAfterCooldown(t *testing.T) {
 		status := resp.StatusCode
 		resp.Body.Close()
 		if status == http.StatusOK {
-			t.Logf("Logs available after cooldown sweep")
-			return
+			return true
 		}
+		// Anything other than 404 means the contract is broken — fail
+		// fast rather than waiting for the deadline.
 		if status != http.StatusNotFound {
 			t.Fatalf("logs unexpected status %d", status)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("logs still 404 after 7 min — cooldown sweep may not be running")
-		}
-		time.Sleep(15 * time.Second)
-	}
+		return false
+	})
+	t.Logf("Logs available after cooldown sweep")
 }
