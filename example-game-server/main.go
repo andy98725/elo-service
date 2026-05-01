@@ -29,14 +29,25 @@ type GameServer struct {
 	expectedPlayers map[string]bool
 	joinedPlayers   map[string]bool
 	mutex           sync.RWMutex
-	website         string
+	reportURL       string
+	artifactURL     string
 	shutdownChan    chan struct{}
 }
 
+// platformBase derives the platform's base URL from the report URL the
+// container was configured with. Both /result/report and /match/artifact
+// live on the same host, so we just strip the report path.
+func platformBase(reportURL string) string {
+	if i := strings.Index(reportURL, "/result/report"); i > 0 {
+		return reportURL[:i]
+	}
+	return reportURL
+}
+
 func NewGameServer(tokenID string, playerIDs []string) *GameServer {
-	website := os.Getenv("WEBSITE_URL")
-	if website == "" {
-		website = "https://elo-service.fly.dev/result/report"
+	reportURL := os.Getenv("WEBSITE_URL")
+	if reportURL == "" {
+		reportURL = "https://elo-service.fly.dev/result/report"
 	}
 
 	expectedPlayers := make(map[string]bool)
@@ -48,7 +59,8 @@ func NewGameServer(tokenID string, playerIDs []string) *GameServer {
 		tokenID:         tokenID,
 		expectedPlayers: expectedPlayers,
 		joinedPlayers:   make(map[string]bool),
-		website:         website,
+		reportURL:       reportURL,
+		artifactURL:     platformBase(reportURL) + "/match/artifact",
 		shutdownChan:    make(chan struct{}),
 	}
 }
@@ -97,6 +109,33 @@ func (gs *GameServer) getExpectedPlayerList() []string {
 	return players
 }
 
+// uploadArtifact pushes a named binary artifact to the matchmaker. Used
+// to demonstrate the platform's per-match artifact mechanism — game
+// servers attach replays, preview images, etc. The match auth_code
+// (same -token used for /result/report) authenticates the upload.
+//
+// Returns the HTTP status so the caller can log it; never fails the
+// caller because artifact upload is best-effort.
+func (gs *GameServer) uploadArtifact(name, contentType string, body []byte) int {
+	url := fmt.Sprintf("%s?name=%s", gs.artifactURL, name)
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("artifact %q: build request failed: %v", name, err)
+		return 0
+	}
+	req.Header.Set("Authorization", "Bearer "+gs.tokenID)
+	req.Header.Set("Content-Type", contentType)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("artifact %q: request failed: %v", name, err)
+		return 0
+	}
+	defer resp.Body.Close()
+	rb, _ := io.ReadAll(resp.Body)
+	log.Printf("artifact %q upload: status=%d body=%s", name, resp.StatusCode, string(rb))
+	return resp.StatusCode
+}
+
 func (gs *GameServer) reportResult() {
 	players := gs.getPlayerList()
 
@@ -106,6 +145,11 @@ func (gs *GameServer) reportResult() {
 	// Randomly select winner
 	winnerID := players[rand.Intn(len(players))]
 	log.Printf("Game finished! Winner: %s", winnerID)
+
+	// Pre-result artifact upload — exercises the "during match" path
+	// of the artifact API. Conventional name "preview" is what
+	// platform-generic UIs render as a match-history thumbnail.
+	gs.uploadArtifact("preview", "image/png", []byte("\x89PNG\r\nfake-preview-bytes"))
 
 	// Prepare request body
 	jsonData, err := json.Marshal(RequestBody{
@@ -119,8 +163,8 @@ func (gs *GameServer) reportResult() {
 	}
 
 	// Send result to elo service
-	log.Printf("Sending result to %s", gs.website)
-	resp, err := http.Post(gs.website, "application/json", bytes.NewBuffer(jsonData))
+	log.Printf("Sending result to %s", gs.reportURL)
+	resp, err := http.Post(gs.reportURL, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Printf("Failed to send request: %v", err)
 		gs.shutdown()
@@ -136,6 +180,14 @@ func (gs *GameServer) reportResult() {
 	}
 
 	log.Printf("Result sent successfully. Status: %s, Body: %s", resp.Status, string(body))
+
+	// Post-result artifact upload — exercises the cooldown contract:
+	// after /result/report returns 2xx, the auth_code stays valid for
+	// the configured cooldown window (default 5 min) so the game
+	// server can finish post-match work like uploading a replay file.
+	// A 200 here means cooldown is working; a 403 would mean the
+	// platform tore the match down too eagerly.
+	gs.uploadArtifact("replay", "application/octet-stream", []byte("post-result-replay-bytes"))
 
 	// Shutdown the server after reporting results
 	log.Println("Shutting down server...")
