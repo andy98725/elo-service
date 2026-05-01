@@ -216,7 +216,7 @@ func waitForLobbyMatch(t *testing.T, conn *websocket.Conn, label string, out cha
 		}
 		switch resp["status"] {
 		case "match_found":
-			addr, _ := resp["server_address"].(string)
+			addr, _ := resp["server_host"].(string)
 			out <- addr
 			return
 		case "error":

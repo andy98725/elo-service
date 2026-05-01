@@ -63,7 +63,7 @@ func TestMatchReportsResult(t *testing.T) {
 			switch status {
 			case "match_found":
 				t.Logf("%s: Server is ready at %s", name, time.Since(connectionStart))
-				serverAddr, _ := resp["server_address"].(string)
+				serverAddr, _ := resp["server_host"].(string)
 				out <- serverAddr
 				return
 			case "server_starting":
@@ -119,6 +119,34 @@ func TestMatchReportsResult(t *testing.T) {
 	gameResult := gameResults["matchResults"].([]interface{})[0].(map[string]interface{})
 	t.Logf("Game result: %+v", gameResult)
 	gameResultID := gameResult["id"].(string)
-	serverLogs := DoReq(t, "GET", fmt.Sprintf("%s/results/%s/logs", *baseURL, gameResultID), nil, guest1Token, http.StatusOK)
-	t.Logf("Server logs: %+v", serverLogs)
+
+	// Logs are written at the cooldown sweep (phase B), not at result
+	// report (phase A). Until the sweep runs the route returns 404 — by
+	// design (see CLAUDE.md "Match completion lifecycle"). Poll until
+	// the sweep has populated LogsKey, with a deadline a bit longer
+	// than the production cooldown window.
+	t.Logf("Polling for logs (waits for cooldown sweep)...")
+	logsURL := fmt.Sprintf("%s/results/%s/logs", *baseURL, gameResultID)
+	deadline := time.Now().Add(7 * time.Minute)
+	for {
+		req, _ := http.NewRequest("GET", logsURL, nil)
+		req.Header.Set("Authorization", "Bearer "+guest1Token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("logs request error: %v", err)
+		}
+		status := resp.StatusCode
+		resp.Body.Close()
+		if status == http.StatusOK {
+			t.Logf("Logs available after cooldown sweep")
+			break
+		}
+		if status != http.StatusNotFound {
+			t.Fatalf("logs unexpected status %d", status)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("logs still 404 after 7m — cooldown sweep may not be running")
+		}
+		time.Sleep(15 * time.Second)
+	}
 }
