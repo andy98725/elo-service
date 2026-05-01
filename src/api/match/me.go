@@ -11,10 +11,11 @@ import (
 // the matchmaking WS `match_found` payload so a reconnecting client can
 // dial the game server without reasoning about a different schema.
 type activeMatch struct {
-	MatchID     string  `json:"match_id"`
-	ServerHost  string  `json:"server_host"`
-	ServerPorts []int64 `json:"server_ports"`
-	StartedAt   string  `json:"started_at"`
+	MatchID      string  `json:"match_id"`
+	ServerHost   string  `json:"server_host"`
+	ServerPorts  []int64 `json:"server_ports"`
+	StartedAt    string  `json:"started_at"`
+	ConnectToken string  `json:"connect_token"`
 }
 
 // GetMyActiveMatches godoc
@@ -43,10 +44,11 @@ func GetMyActiveMatches(ctx echo.Context) error {
 	out := make([]activeMatch, 0, len(matches))
 	for _, m := range matches {
 		out = append(out, activeMatch{
-			MatchID:     m.ID,
-			ServerHost:  m.ServerInstance.MachineHost.PublicAddress(),
-			ServerPorts: []int64(m.ServerInstance.HostPorts),
-			StartedAt:   m.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			MatchID:      m.ID,
+			ServerHost:   m.ServerInstance.MachineHost.PublicAddress(),
+			ServerPorts:  []int64(m.ServerInstance.HostPorts),
+			StartedAt:    m.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			ConnectToken: playerID,
 		})
 	}
 

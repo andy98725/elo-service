@@ -8,7 +8,7 @@ import (
 func InitRoutes(e *echo.Echo) error {
 	// Match reporting
 	e.POST("/result/report", ReportResults)
-	e.GET("/results/:matchID/logs", GetMatchLogs, auth.RequireUserOrGuestAuth)
+	e.GET("/results/:matchID/logs", GetMatchLogs, auth.RequireUserAuth)
 
 	// CRUD
 	e.GET("/results/:matchID", GetMatchResult, auth.RequireUserOrGuestAuth)

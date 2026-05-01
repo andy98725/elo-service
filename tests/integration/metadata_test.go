@@ -21,8 +21,13 @@ func createMetadataEnabledGame(t *testing.T, baseURL, token, name string, lobbyS
 
 	updated := DoReq(t, "PUT", fmt.Sprintf("%s/game/%s", baseURL, gameID),
 		map[string]interface{}{"metadata_enabled": true}, token, http.StatusOK)
-	if updated["metadata_enabled"] != true {
-		t.Fatalf("metadata_enabled did not stick: %+v", updated)
+	queues, _ := updated["queues"].([]interface{})
+	if len(queues) == 0 {
+		t.Fatalf("update response has no queues: %+v", updated)
+	}
+	primary, _ := queues[0].(map[string]interface{})
+	if primary["metadata_enabled"] != true {
+		t.Fatalf("metadata_enabled did not stick on primary queue: %+v", updated)
 	}
 	return gameID
 }

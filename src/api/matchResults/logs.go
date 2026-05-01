@@ -26,13 +26,12 @@ func saveMatchLogs(ctx context.Context, si *models.ServerInstance) (string, erro
 
 // GetMatchLogs godoc
 // @Summary      Get match logs
-// @Description  Returns the logs for a completed match. Access depends on game settings and user role.
+// @Description  Returns the logs for a completed match. Access is restricted to the game's owner and site admins; participants cannot view logs.
 // @Tags         Results
 // @Produce      text/plain
 // @Security     BearerAuth
 // @Param        matchID path string true "Match result UUID"
 // @Success      200 {string} string "Match logs"
-// @Failure      403 {object} echo.HTTPError
 // @Failure      404 {object} echo.HTTPError
 // @Failure      500 {object} echo.HTTPError
 // @Router       /results/{matchID}/logs [get]
@@ -50,18 +49,15 @@ func GetMatchLogs(ctx echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "error getting match result: "+err.Error())
 	}
 
-	if canSee, err := models.CanUserSeeMatchResult(id, matchID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "error checking if user can see match result: "+err.Error())
-	} else if !canSee {
+	// Logs are restricted to the game's owner and site admins. Non-admins
+	// (including match participants) get 404 rather than 403 to avoid
+	// confirming that the match exists. The Game.PublicMatchLogs field is
+	// no longer consulted — kept for now for schema/API compatibility but
+	// has no effect on this endpoint.
+	if isAdmin, err := models.IsUserMatchResultAdmin(id, matchID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "error checking access: "+err.Error())
+	} else if !isAdmin {
 		return echo.NewHTTPError(http.StatusNotFound, "Match result not found")
-	}
-
-	if !matchResult.Game.PublicMatchLogs {
-		if isAdmin, err := models.IsUserMatchResultAdmin(id, matchID); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "error checking if user is admin: "+err.Error())
-		} else if !isAdmin {
-			return echo.NewHTTPError(http.StatusForbidden, "Match logs are not public.")
-		}
 	}
 
 	if matchResult.LogsKey == "" {

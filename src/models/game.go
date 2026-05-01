@@ -54,10 +54,10 @@ type Game struct {
 	Queues []GameQueue `json:"queues" gorm:"foreignKey:GameID;constraint:OnDelete:CASCADE"`
 }
 
-// GameResp serializes a game with its queues. The legacy flat queue
-// fields (lobby_size, matchmaking_machine_name, etc.) are populated from
-// the default queue (Queues[0]) for backwards compat with existing
-// clients — multi-queue clients should iterate `queues` directly.
+// GameResp serializes a game with its queues. Per-queue config
+// (lobby_size, matchmaking_machine_name, etc.) lives under `queues[]` —
+// `queues[0]` is the default queue, used when API callers don't specify
+// a queueID.
 type GameResp struct {
 	ID              string          `json:"id"`
 	Owner           UserResp        `json:"owner"`
@@ -68,18 +68,6 @@ type GameResp struct {
 	PublicMatchLogs bool            `json:"public_match_logs"`
 	SpectateEnabled bool            `json:"spectate_enabled"`
 	Queues          []GameQueueResp `json:"queues"`
-
-	// Legacy flat queue fields, mirrored from Queues[0]. Empty/zero
-	// when the game has no queues (transient state during creation).
-	LobbyEnabled            bool    `json:"lobby_enabled"`
-	LobbySize               int     `json:"lobby_size"`
-	MatchmakingStrategy     string  `json:"matchmaking_strategy"`
-	MatchmakingMachineName  string  `json:"matchmaking_machine_name"`
-	MatchmakingMachinePorts []int64 `json:"matchmaking_machine_ports"`
-	ELOStrategy             string  `json:"elo_strategy"`
-	DefaultRating           int     `json:"default_rating"`
-	KFactor                 int     `json:"k_factor"`
-	MetadataEnabled         bool    `json:"metadata_enabled"`
 }
 
 func (g *Game) ToResp() *GameResp {
@@ -87,7 +75,7 @@ func (g *Game) ToResp() *GameResp {
 	for i, q := range g.Queues {
 		queues[i] = *q.ToResp()
 	}
-	resp := &GameResp{
+	return &GameResp{
 		ID:              g.ID,
 		Owner:           *g.Owner.ToResp(),
 		Name:            g.Name,
@@ -98,19 +86,6 @@ func (g *Game) ToResp() *GameResp {
 		SpectateEnabled: g.SpectateEnabled,
 		Queues:          queues,
 	}
-	if len(queues) > 0 {
-		d := queues[0]
-		resp.LobbyEnabled = d.LobbyEnabled
-		resp.LobbySize = d.LobbySize
-		resp.MatchmakingStrategy = d.MatchmakingStrategy
-		resp.MatchmakingMachineName = d.MatchmakingMachineName
-		resp.MatchmakingMachinePorts = d.MatchmakingMachinePorts
-		resp.ELOStrategy = d.ELOStrategy
-		resp.DefaultRating = d.DefaultRating
-		resp.KFactor = d.KFactor
-		resp.MetadataEnabled = d.MetadataEnabled
-	}
-	return resp
 }
 
 // CreateGameParams bundles game-level fields and the parameters for the

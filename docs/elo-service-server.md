@@ -23,33 +23,37 @@ Everything below derives from these four facts:
 
 ### 1. Argv contract
 
-Your container is invoked with:
+The container is invoked with:
 
 ```
-<your-binary> -token <token> <playerID1> <playerID2> [<playerID3> …]
+<your-binary> -token <match-token> <connectToken1> <connectToken2> [<connectToken3> …]
 ```
 
-- `-token <token>` — opaque per-match secret. Treat as a bearer credential. **Don't log it, don't expose it to clients.** This is the only thing that authenticates your result POST back to elo-service.
-- The remaining positional args are **player IDs**, one per expected player. They are the same IDs the clients themselves know:
+- `-token <match-token>` — opaque per-match secret used to authenticate game-server calls back to elo-service (`/result/report`, `/match/artifact`, server-authored `/games/.../data/.../...`). It is the bearer credential for those routes.
+- The remaining positional args are **connect tokens** — one per expected player. Each is the credential a single client presents on join. Each incoming connection's token must match an entry in this list.
+
+A connect token is a per-(match, player) join credential, not a stable player identity. Its value currently equals the player's ID:
   - Registered users: UUID strings (e.g., `7a8b9c10-…`).
   - Guests: prefixed with `g_` (e.g., `g_7a8b9c10-…`).
 
-The number of player IDs equals the game's `lobby_size`. They arrive in no particular order — don't depend on it.
+A planned change swaps the value for an opaque per-(match, player) generated secret. The argv shape and the validation rule ("token must be in the expected set") stay the same — only the values become non-identifying.
 
-You **must** parse argv before doing anything else and fail loudly if either `-token` or the player ID list is missing.
+The number of connect tokens equals the game's `lobby_size`. They arrive in no particular order.
+
+The container must parse argv before doing anything else and fail loudly if either `-token` or the connect-token list is missing — those inputs are required, and absence indicates a misconfigured invocation that has no recoverable path.
 
 ```go
 // Reference: example-game-server/main.go, func main()
-var tokenID string
-flag.StringVar(&tokenID, "token", "", "Token ID (required)")
+var matchToken string
+flag.StringVar(&matchToken, "token", "", "Match auth token (required)")
 flag.Parse()
-playerIDs := flag.Args()
-if tokenID == "" || len(playerIDs) == 0 { log.Fatal("…") }
+connectTokens := flag.Args()
+if matchToken == "" || len(connectTokens) == 0 { log.Fatal("…") }
 ```
 
 ### 2. Logging
 
-Write everything to **stdout and/or stderr**. After the match ends, the matchmaker fetches `docker logs <container>` from the host agent and uploads it to S3 as the official match log (downloadable by clients via `/results/{matchID}/logs` if the game has `public_match_logs=true`).
+Write everything to **stdout and/or stderr**. After the match ends, the matchmaker fetches `docker logs <container>` from the host agent and uploads it to S3 as the official match log. Logs are downloadable via `/results/{matchID}/logs` but the route is **restricted to the game's owner and site admins** — match participants and other users cannot read them. The legacy `Game.public_match_logs` flag is no longer consulted.
 
 Do **not** depend on a sidecar — the production flow uses Docker logs directly. There is a `game-server-sidecar` image in this repo that tails `/shared/server.log`, but it is not currently composed alongside the game-server container by the host agent; logs come from stdout/stderr.
 
@@ -151,13 +155,14 @@ You can upload mid-match (post-state-snapshot, after each round) or all-at-once 
 
 ## How players connect to you
 
-The matchmaker hands clients a payload like:
+The matchmaker hands each client a payload like:
 
 ```json
-{ "status": "match_found",
-  "server_host":  "host-a4f9b2d8-1234-5678-90ab-cdef01234567.gs.elomm.net",   // OR raw IPv4
-  "server_ports": [7042, 7043],
-  "match_id":     "<uuid>" }
+{ "status":        "match_found",
+  "server_host":   "host-a4f9b2d8-1234-5678-90ab-cdef01234567.gs.elomm.net",   // OR raw IPv4
+  "server_ports":  [7042, 7043],
+  "match_id":      "<uuid>",
+  "connect_token": "<opaque string>" }
 ```
 
 The hostname format is `host-<machine-host-uuid>.gs.elomm.net` — the full host UUID, not a short slug.
@@ -172,27 +177,29 @@ The client opens a connection to `<server_host>:<server_ports[i]>`. They will co
 
 ### Player identification
 
-The `match_found` payload **does not include any auth code or signed claim**. Players announce themselves by sending their **player ID** (the same string you got in argv) when they connect. Your job is to validate it.
+The `match_found` payload carries a `connect_token` per player. Each client presents its token on join; the game server admits the connection if the value matches one of the connect tokens received in argv.
 
-The canonical pattern (used by `example-game-server`):
+The canonical wire format (used by `example-game-server`):
 
-- HTTP: `POST /join` with the player ID as the request body (plain text).
-- TCP: First line is the player ID, terminated by `\n`.
+- HTTP: `POST /join` with the connect token as the request body (plain text).
+- TCP: First line is the connect token, terminated by `\n`.
 
-Your validation rules:
+Validation responses:
 
 | Condition | Response |
 |---|---|
-| Player ID is in your expected list and hasn't joined yet | `200 OK` (HTTP) / `OK: …\n` (TCP) |
-| Player ID is empty or malformed | `400 Bad Request` |
-| Player ID is **not** in your expected list | `403 Forbidden` |
-| Player ID has already joined | `409 Conflict` |
+| Connect token is in the expected list and has not joined yet | `200 OK` (HTTP) / `OK: …\n` (TCP) |
+| Connect token is empty or malformed | `400 Bad Request` |
+| Connect token is not in the expected list | `403 Forbidden` |
+| Connect token has already joined | `409 Conflict` |
 
-Once all expected players have joined, run the game.
+The match begins once every expected connect token has joined.
 
 ### Trust model
 
-The player ID is **not cryptographically signed** at connect time. A determined attacker who guesses or steals another player's ID could impersonate them. For the current games this is treated as acceptable (IDs are UUIDs, single-match tokens). If your game needs stronger auth, you can require the client to also send its full JWT and verify it via the elo-service public key — but no current game does this and the matchmaker doesn't help you with it.
+In the current rollout, connect tokens equal player IDs — a determined attacker who guesses or steals another player's ID can impersonate them. A planned change swaps the value for an opaque per-(match, player) secret generated by the matchmaker, which raises the bar to "intercept the WebSocket / TLS channel that delivered `match_found`." The argv shape and validation rule are unchanged between phases.
+
+Stronger guarantees are also available out-of-band: a game server can require clients to send their full JWT and verify it against elo-service. The matchmaker provides no helper for this path; no current game uses it.
 
 ---
 
@@ -326,7 +333,7 @@ Field reference:
 | `description` | no | `""` | User-facing. |
 | `guests_allowed` | no | `true` | If `false`, only registered users can queue. |
 | `public_results` | no | `true` | If `true`, anyone can see match results for this game; if `false`, only participants and the game owner. |
-| `public_match_logs` | no | `false` | If `true`, anyone with a result can download container logs; if `false`, only the game owner. |
+| `public_match_logs` | no | `false` | **Deprecated** — no longer consulted. Match logs are restricted to the game's owner and site admins regardless of this flag. The field is preserved for now to avoid breaking existing CRUD callers but has no effect. |
 | `matchmaking_machine_name` | no | `docker.io/andy98725/example-server:latest` | Primary queue field. Full Docker image ref (`registry/repo:tag`). The host VM must be able to `docker pull` it — public images on Docker Hub work; private registries need credentials configured on the host VM image. **Almost always set this**: omitting it silently falls back to the demo example-server, which is rarely what you want for a real game. |
 | `matchmaking_machine_ports` | no | `[]` | Primary queue field. Ports your container listens on. Order is preserved in the client `server_ports` array. |
 | `lobby_size` | no | `2` | Primary queue field. Players per match — matchmaker waits for this many before spawning. |
@@ -337,7 +344,7 @@ Field reference:
 | `k_factor` | no | `32` | Primary queue field. Elo K factor (only used when `elo_strategy="classic"`). |
 | `metadata_enabled` | no | `false` | Primary queue field. If `true`, the `metadata` query param on `/match/join` segments the queue (e.g., by region or game mode). |
 
-Response `200`: a `GameResp` with the new `id` (UUID), a `queues` array (one entry: the primary queue), and the legacy flat fields mirrored from `queues[0]` for backwards compatibility.
+Response `200`: a `GameResp` with the new `id` (UUID) and a `queues` array (one entry: the primary queue). Per-queue config lives entirely under `queues[]` — read it from there.
 
 Update with `PUT /game/{id}` (only the owner). Delete with `DELETE /game/{id}` — cascades to all queues, ratings, and per-game player data.
 
@@ -385,18 +392,18 @@ import (
 const reportURL = "https://elomm.net/result/report"
 
 func main() {
-    var tokenID string
-    flag.StringVar(&tokenID, "token", "", "match token (required)")
+    var matchToken string
+    flag.StringVar(&matchToken, "token", "", "match token (required)")
     flag.Parse()
-    expected := flag.Args()
-    if tokenID == "" || len(expected) == 0 {
-        log.Fatal("missing -token or player IDs")
+    connectTokens := flag.Args()
+    if matchToken == "" || len(connectTokens) == 0 {
+        log.Fatal("missing -token or connect tokens")
     }
-    log.Printf("starting match: players=%v", expected) // never log the token
+    log.Printf("starting match: %d expected players", len(connectTokens)) // never log -token
 
-    expectedSet := map[string]bool{}
-    for _, p := range expected {
-        expectedSet[p] = true
+    expected := map[string]bool{}
+    for _, t := range connectTokens {
+        expected[t] = true
     }
 
     var mu sync.Mutex
@@ -405,19 +412,19 @@ func main() {
 
     http.HandleFunc("/join", func(w http.ResponseWriter, r *http.Request) {
         body, _ := io.ReadAll(r.Body)
-        id := string(body)
-        if !expectedSet[id] {
+        tok := string(body)
+        if !expected[tok] {
             http.Error(w, "not expected", http.StatusForbidden)
             return
         }
         mu.Lock()
         defer mu.Unlock()
-        if joined[id] {
+        if joined[tok] {
             http.Error(w, "already joined", http.StatusConflict)
             return
         }
-        joined[id] = true
-        log.Printf("player joined: %s (%d/%d)", id, len(joined), len(expected))
+        joined[tok] = true
+        log.Printf("player joined (%d/%d)", len(joined), len(expected))
         if len(joined) == len(expected) {
             close(done)
         }
@@ -427,10 +434,17 @@ func main() {
 
     <-done
     // …run the game…
-    winner := expected[0] // pick the real winner
+    // Phase 1: connect tokens equal player IDs, so a token doubles as a
+    // valid winner_id. Phase 2 will require an explicit (player_id,
+    // connect_token) mapping in argv to keep this honest.
+    var winner string
+    for tok := range joined {
+        winner = tok
+        break
+    }
 
     body, _ := json.Marshal(map[string]any{
-        "token_id":   tokenID,
+        "token_id":   matchToken,
         "winner_ids": []string{winner},
         "reason":     "completed",
     })
@@ -479,7 +493,7 @@ You don't need to expose a `/health` endpoint of your own (though `example-game-
 | `GET`  | `/game/{gameID}/queue/{queueID}` | public | Fetch one queue |
 | `PUT`  | `/game/{gameID}/queue/{queueID}` | game owner | Update a queue's matchmaking config |
 | `DELETE` | `/game/{gameID}/queue/{queueID}` | game owner | Delete a queue (refused with `409` if it's the last one) |
-| `GET`  | `/results/{matchID}/logs` | user/guest | Download container stdout (if public) |
+| `GET`  | `/results/{matchID}/logs` | user (owner/admin only) | Download container stdout — restricted to the game's owner and site admins |
 | `GET`  | `/games/{gameID}/data/{playerID}/player` | match token | Read player-authored entries |
 | `GET`  | `/games/{gameID}/data/{playerID}/server` | match token | Read server-authored entries |
 | `PUT`  | `/games/{gameID}/data/{playerID}/{key}` | match token | Upsert a server-authored entry |

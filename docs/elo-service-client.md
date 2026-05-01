@@ -177,23 +177,14 @@ Game listings return:
           "k_factor": 32,
           "metadata_enabled": false
         }
-      ],
-
-      // Legacy mirror of queues[0]. Kept for backwards compat with single-queue clients.
-      "lobby_enabled": true,
-      "lobby_size": 2,
-      "matchmaking_strategy": "random",
-      "matchmaking_machine_name": "alice/tictactoe:latest",
-      "matchmaking_machine_ports": [8080],
-      "elo_strategy": "unranked",
-      "metadata_enabled": false
+      ]
     }
   ],
   "nextPage": 1
 }
 ```
 
-Each game has an ordered `queues` array. The first element (`queues[0]`) is the **default queue** — the one used when matchmaking, lobby, or rating endpoints are called without an explicit `queueID`. Single-queue games (the default) need only the legacy mirror; multi-queue games (different game modes / images / ELO settings under one game) iterate `queues` and let the player pick.
+Each game has an ordered `queues` array. The first element (`queues[0]`) is the **default queue** — the one used when matchmaking, lobby, or rating endpoints are called without an explicit `queueID`. Single-queue games will only ever have one entry; multi-queue games (different game modes / images / ELO settings under one game) iterate `queues` and let the player pick.
 
 `nextPage` is the index to pass as `page` on the next call, **or `-1` if you've reached the end of the list** (the page returned fewer rows than `pageSize`). Stop paginating when you see `-1`.
 
@@ -236,12 +227,15 @@ Every message is `{ "status": "<string>", … }`. You'll always see them in roug
 // 4. Server is ready. This is the terminal success message.
 //    The WS will close after this.
 {
-  "status": "match_found",
-  "server_host":  "host-<uuid>.gs.elomm.net",   // OR a raw IPv4 — see below
-  "server_ports": [7042, 7043],                  // ints, in the order the game declared them
-  "match_id":     "<uuid>"
+  "status":        "match_found",
+  "server_host":   "host-<uuid>.gs.elomm.net",   // OR a raw IPv4 — see below
+  "server_ports":  [7042, 7043],                  // ints, in the order the game declared them
+  "match_id":      "<uuid>",
+  "connect_token": "<opaque string>"             // join credential for the game server
 }
 ```
+
+`connect_token` is the per-player credential the game server expects when the client joins the match. Its value currently equals the player's ID; a planned change replaces it with an opaque per-(match, player) secret under the same field name.
 
 > **Heartbeat continues across phases.** The same 5s ticker that emits `{"status": "searching"}` keeps firing through `server_starting` too: once the queue fills, you'll see one `server_starting` frame *with* the `message` field (shown above), then bare `{"status": "server_starting"}` heartbeats every ~5s until `match_found`. Don't treat duplicate `server_starting` frames as a bug.
 
@@ -272,29 +266,14 @@ The server responds with `{"status": "disconnected"}`, removes you from the queu
 
 ### WebSocket keepalive (Ping/Pong)
 
-The matchmaking and lobby WSes both run server-driven keepalive: the server sends an [RFC 6455 Ping control frame](https://datatracker.ietf.org/doc/html/rfc6455#section-5.5.2) every **30 seconds** and expects a Pong back within **75 seconds**. This is independent of the JSON `{"status": "searching"}` heartbeat — pings are at the WS protocol layer, not application messages.
+The matchmaking and lobby WSes run server-driven keepalive: the server sends an [RFC 6455 Ping control frame](https://datatracker.ietf.org/doc/html/rfc6455#section-5.5.2) every **30 seconds** and expects a Pong back within **75 seconds**. This is independent of the JSON `{"status": "searching"}` heartbeat — pings are at the WS protocol layer, not application messages.
 
-If you're using one of these, **you don't need to do anything** — they reply to pings automatically:
+WS libraries that auto-reply to pings (browser `WebSocket`, Go `gorilla/websocket` with the default `PongHandler`, Node.js `ws`, most C# / Unity / Unreal libraries, Python `websockets`) need no special handling. Low-level libraries require an explicit Pong response from a ping handler.
 
-- Browser `WebSocket` (web / WebGL clients)
-- Go: `github.com/gorilla/websocket` (default `PongHandler`)
-- Node.js `ws`
-- Most C# / Unity / Unreal `WebSocket` libraries
-- Python `websockets`
+The server has two modes for missed-pong handling, controlled by the `WSLivenessDisconnectEnabled` config flag:
 
-If you're using a low-level WS library that **doesn't** auto-reply to ping frames, you must register a Ping handler that writes a Pong frame back. Check your library's docs for "ping handler" or "control frame".
-
-#### Rollout timeline (action required for some clients)
-
-The server is currently in **soft mode**: it sends pings and tracks pong arrivals, but clients that don't pong are *not* disconnected — the server only logs a warning. This grace period lets existing clients keep working while teams ship updates.
-
-**A future server release will flip to hard mode.** Once that happens, any WS that misses pongs for 75 s gets closed by the server with a normal WS close frame; reconnect to rejoin the queue.
-
-What to do **now**:
-
-1. Verify your client library replies to WS pings automatically (see list above).
-2. If it doesn't, wire up a ping handler that responds with a Pong.
-3. If you tunnel the WS through a proxy or framework that strips control frames, fix that — the connection will start dropping once hard mode lands.
+- **Soft mode** (`false`, default): pings are sent and pong arrivals tracked, but clients that don't pong are not disconnected — missed pongs are logged.
+- **Hard mode** (`true`): a WS that misses pongs for 75 s is closed by the server with a normal WS close frame.
 
 ### Connecting to the spawned game server
 
@@ -339,14 +318,16 @@ If `server_host` looks like an IPv4, the host is non-TLS — only a native clien
 
 ### Identifying yourself to the game server
 
-The `match_found` payload **does not include an auth code**. Players are identified by their **JWT-derived player ID** — the same `id` you got back from `/guest/login` or `/user/login`. The game server has been told (via its argv) which player IDs to expect, and your client must announce its ID when it connects.
+The `match_found` payload carries a `connect_token` — the credential the client presents to the game server on join. The matchmaker has handed the game server (via argv) the set of connect tokens admissible for this match; the client sends back the value it received.
 
-The exact wire format depends on the game-server implementation, but the canonical pattern (used by `example-game-server`) is:
+The exact wire format depends on the game-server implementation. The canonical pattern (used by `example-game-server`) is:
 
-- Send your player ID as the body of `POST /join` over HTTP, or
-- Write your player ID followed by `\n` as the first line on TCP
+- HTTP: `POST /join` with `connect_token` as the request body (plain text).
+- TCP: `connect_token` followed by `\n` as the first line.
 
-The game server will reject you with `403 Forbidden` if your ID isn't in its expected list (i.e., the matchmaker didn't queue you for that match) and `409 Conflict` if you've already joined.
+A game server rejects unknown tokens with `403 Forbidden` and tokens that have already joined with `409 Conflict`.
+
+`connect_token` currently equals the player's ID, so the wire bytes match the previous protocol where clients sent the player ID directly. A planned change replaces the value with an opaque per-(match, player) secret; the field name and the validation rule do not change.
 
 ### Queue size (HTTP)
 
@@ -375,10 +356,11 @@ Response `200`:
 {
   "matches": [
     {
-      "match_id":     "<uuid>",
-      "server_host":  "host-...gs.elomm.net",
-      "server_ports": [7001],
-      "started_at":   "2026-04-29T08:24:04Z"
+      "match_id":      "<uuid>",
+      "server_host":   "host-...gs.elomm.net",
+      "server_ports":  [7001],
+      "started_at":    "2026-04-29T08:24:04Z",
+      "connect_token": "<opaque string>"
     }
   ]
 }
@@ -473,11 +455,11 @@ After a match ends, the game server reports its result to elo-service, which per
 | `/results/{matchID}` | GET | user/guest | One match's final result (winners, reason) |
 | `/game/{gameID}/results?page=&pageSize=` | GET | user/guest | Paginated results for a game (filtered to what the caller can see) |
 | `/user/results?page=&pageSize=` | GET | user/guest | The caller's own match history |
-| `/results/{matchID}/logs` | GET | user/guest | Container stdout for the match (only if the game has `public_match_logs=true`, else owner-only) |
+| `/results/{matchID}/logs` | GET | user (owner/admin only) | Container stdout for the match — restricted to the game's owner and site admins |
 
 Visibility is enforced server-side per the game's `public_results` flag — non-public games only show results to participants/owners. The result-fetch routes return `404 Not Found` both for missing results and for results the caller can't see (don't infer existence from the status code).
 
-`/results/{matchID}/logs` is the exception: when `public_match_logs=false` and the caller isn't the game owner (or an admin), it returns `403 Forbidden "Match logs are not public."`, not `404`. A `404` from this route means the match result itself doesn't exist (or isn't visible) or has no stored logs.
+`/results/{matchID}/logs` is locked down to the game's owner and site admins. Anyone else — including match participants — gets `404 Not Found` (existence is hidden, by design). Guest tokens are rejected with `401`. The legacy `Game.public_match_logs` flag is no longer consulted; setting it has no effect on this route.
 
 ### Match artifacts
 
@@ -822,7 +804,7 @@ WebSocket failures use the in-band `{"status": "error", "error": …}` frame ins
 | `GET`  | `/user/rating/{gameId}` | user | Your rating in a queue (optional `queueID`, default primary) |
 | `GET`  | `/game/{gameId}/leaderboard` | none | Top-rated players in a queue (optional `queueID`, default primary) |
 | `GET`  | `/results/{matchID}` | user/guest | One match's result |
-| `GET`  | `/results/{matchID}/logs` | user/guest | Download match logs (if public) |
+| `GET`  | `/results/{matchID}/logs` | user (owner/admin only) | Download match logs — owner of the game or site admin only |
 | `GET`  | `/game/{gameID}/results` | user/guest | Paginated results for a game |
 | `GET`  | `/user/results` | user/guest | Your own match history |
 | `GET`  | `/games/{gameID}/data/me/player` | user | Your player-authored entries for this game |

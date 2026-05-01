@@ -17,12 +17,8 @@ func TestLobbyFlow(t *testing.T) {
 	flag.Parse()
 
 	t.Logf("Logging in as guests...")
-	guest1 := DoReq(t, "POST", fmt.Sprintf("%s/guest/login", *baseURL), map[string]string{"displayName": "lobbyguest1"}, "", http.StatusOK)
-	guest1Token := strings.TrimSpace(guest1["token"].(string))
-	guest1ID := strings.TrimSpace(guest1["id"].(string))
-	guest2 := DoReq(t, "POST", fmt.Sprintf("%s/guest/login", *baseURL), map[string]string{"displayName": "lobbyguest2"}, "", http.StatusOK)
-	guest2Token := strings.TrimSpace(guest2["token"].(string))
-	guest2ID := strings.TrimSpace(guest2["id"].(string))
+	guest1Token, guest1ID := LoginGuest(t, *baseURL, "lobbyguest1")
+	guest2Token, guest2ID := LoginGuest(t, *baseURL, "lobbyguest2")
 	t.Logf("Guest 1: %s, Guest 2: %s", guest1ID, guest2ID)
 
 	hostURL := fmt.Sprintf("%s/lobby/host?gameID=%s&tags=foo,bar&metadata=%s", *baseURL, exampleGameID, "{}")
@@ -53,6 +49,9 @@ func TestLobbyFlow(t *testing.T) {
 			found = true
 			if int(l["players"].(float64)) != 1 {
 				t.Fatalf("find: expected 1 player in new lobby, got %v", l["players"])
+			}
+			if pp, _ := l["password_protected"].(bool); pp {
+				t.Fatalf("find: lobby was hosted without password but password_protected=true")
 			}
 			break
 		}
@@ -92,19 +91,15 @@ func TestLobbyFlow(t *testing.T) {
 		t.Fatalf("host: failed to write /start: %v", err)
 	}
 
-	results := make(chan string, 2)
-	go waitForLobbyMatch(t, hostConn, "host", results)
-	go waitForLobbyMatch(t, joinerConn, "joiner", results)
-
-	addr1 := strings.Trim(<-results, `"`)
-	addr2 := strings.Trim(<-results, `"`)
-	if addr1 == "" || addr2 == "" {
-		t.Fatalf("expected non-empty server addresses, got %s and %s", addr1, addr2)
+	results := make(chan MatchFound, 2)
+	go func() { results <- AwaitMatchFound(t, hostConn, "host") }()
+	go func() { results <- AwaitMatchFound(t, joinerConn, "joiner") }()
+	m1 := <-results
+	m2 := <-results
+	if m1.MatchID != m2.MatchID {
+		t.Fatalf("expected same match_id on host/joiner, got %s and %s", m1.MatchID, m2.MatchID)
 	}
-	if addr1 != addr2 {
-		t.Fatalf("expected same server address, got %s and %s", addr1, addr2)
-	}
-	t.Logf("Match found at %s after %s", addr1, time.Since(connectionStart))
+	t.Logf("Match found at %s after %s", m1.ServerHost, time.Since(connectionStart))
 
 	// Confirm the lobby is gone from /lobby/find.
 	postFind := DoReq(t, "GET", fmt.Sprintf("%s/lobby/find?gameID=%s", *baseURL, exampleGameID), nil, guest2Token, http.StatusOK)
@@ -116,16 +111,22 @@ func TestLobbyFlow(t *testing.T) {
 			}
 		}
 	}
+
+	// Drive the match to completion so we don't leak a container into
+	// the cooldown sweep — the host pool is small. The example server
+	// will /result/report once both players join.
+	JoinContainer(t, m1, guest1ID)
+	JoinContainer(t, m1, guest2ID)
+	WaitForMatchResult(t, *baseURL, m1.MatchID, guest1Token, 60*time.Second)
+	t.Logf("Lobby-started match completed cleanly")
 }
 
 // go test -v -run TestLobbyHostKick ./tests/e2e -args -url http://localhost:8080
 func TestLobbyHostKick(t *testing.T) {
 	flag.Parse()
 
-	guest1 := DoReq(t, "POST", fmt.Sprintf("%s/guest/login", *baseURL), map[string]string{"displayName": "kickerhost"}, "", http.StatusOK)
-	guest1Token := strings.TrimSpace(guest1["token"].(string))
-	guest2 := DoReq(t, "POST", fmt.Sprintf("%s/guest/login", *baseURL), map[string]string{"displayName": "kicktarget"}, "", http.StatusOK)
-	guest2Token := strings.TrimSpace(guest2["token"].(string))
+	guest1Token, _ := LoginGuest(t, *baseURL, "kickerhost")
+	guest2Token, _ := LoginGuest(t, *baseURL, "kicktarget")
 
 	hostConn := WebsocketConnect(t, fmt.Sprintf("%s/lobby/host?gameID=%s", *baseURL, exampleGameID), guest1Token)
 	defer hostConn.Close()
@@ -169,6 +170,120 @@ func TestLobbyHostKick(t *testing.T) {
 	}
 }
 
+// TestLobbyPasswordProtection verifies the optional lobby password
+// gate end-to-end against the live server: a lobby hosted with
+// ?password=… is hidden via password_protected=true in /lobby/find,
+// rejects joiners that omit or supply a wrong password, and accepts
+// the right one. Public listing should never reveal the secret.
+//
+// go test -v -run TestLobbyPasswordProtection ./tests/e2e -args -url http://localhost:8080
+func TestLobbyPasswordProtection(t *testing.T) {
+	flag.Parse()
+
+	hostToken, _ := LoginGuest(t, *baseURL, "pwhost")
+	joinerToken, _ := LoginGuest(t, *baseURL, "pwjoiner")
+	wrongToken, _ := LoginGuest(t, *baseURL, "pwwrong")
+
+	hostURL := fmt.Sprintf("%s/lobby/host?gameID=%s&password=secret123", *baseURL, exampleGameID)
+	hostConn := WebsocketConnect(t, hostURL, hostToken)
+	defer hostConn.Close()
+	hostHello := readJSON(t, hostConn, "host")
+	lobbyID, _ := hostHello["lobby_id"].(string)
+	if lobbyID == "" {
+		t.Fatalf("host: missing lobby_id, got %+v", hostHello)
+	}
+
+	// /lobby/find should advertise the lobby with password_protected=true.
+	// The password itself must NOT be in the response.
+	findResp := DoReq(t, "GET", fmt.Sprintf("%s/lobby/find?gameID=%s", *baseURL, exampleGameID), nil, joinerToken, http.StatusOK)
+	lobbies, _ := findResp["lobbies"].([]interface{})
+	var match map[string]interface{}
+	for _, raw := range lobbies {
+		l, _ := raw.(map[string]interface{})
+		if l["id"] == lobbyID {
+			match = l
+			break
+		}
+	}
+	if match == nil {
+		t.Fatalf("password lobby missing from /lobby/find: %+v", findResp)
+	}
+	if pp, _ := match["password_protected"].(bool); !pp {
+		t.Fatalf("expected password_protected=true, got %+v", match)
+	}
+	for k, v := range match {
+		if vs, ok := v.(string); ok && strings.Contains(strings.ToLower(vs), "secret") {
+			t.Fatalf("/lobby/find leaks password in field %q: %q", k, vs)
+		}
+	}
+
+	// No password — must be rejected.
+	wrongConn := WebsocketConnect(t, fmt.Sprintf("%s/lobby/join?lobbyID=%s", *baseURL, lobbyID), wrongToken)
+	wrongHello := readJSON(t, wrongConn, "no-pw")
+	wrongConn.Close()
+	if wrongHello["status"] != "error" {
+		t.Fatalf("no-password join: expected error, got %+v", wrongHello)
+	}
+
+	// Wrong password — also rejected, with the same generic error
+	// (server doesn't differentiate so it can't enumerate lobbies).
+	wrongConn2 := WebsocketConnect(t, fmt.Sprintf("%s/lobby/join?lobbyID=%s&password=nope", *baseURL, lobbyID), wrongToken)
+	wrongHello2 := readJSON(t, wrongConn2, "wrong-pw")
+	wrongConn2.Close()
+	if wrongHello2["status"] != "error" {
+		t.Fatalf("wrong-password join: expected error, got %+v", wrongHello2)
+	}
+
+	// Correct password — accepted.
+	rightConn := WebsocketConnect(t, fmt.Sprintf("%s/lobby/join?lobbyID=%s&password=secret123", *baseURL, lobbyID), joinerToken)
+	defer rightConn.Close()
+	rightHello := readJSON(t, rightConn, "right-pw")
+	if rightHello["status"] != "lobby_joined" {
+		t.Fatalf("right-password join: expected lobby_joined, got %+v", rightHello)
+	}
+}
+
+// TestLobbyPrivateExcludedFromFind verifies the private flag: a lobby
+// hosted with ?private=true is reachable by direct lobby ID but is
+// NOT advertised by /lobby/find. The server's only signal that the
+// lobby exists is the join attempt working.
+//
+// go test -v -run TestLobbyPrivateExcludedFromFind ./tests/e2e -args -url http://localhost:8080
+func TestLobbyPrivateExcludedFromFind(t *testing.T) {
+	flag.Parse()
+
+	hostToken, _ := LoginGuest(t, *baseURL, "privhost")
+	joinerToken, _ := LoginGuest(t, *baseURL, "privjoiner")
+
+	hostConn := WebsocketConnect(t,
+		fmt.Sprintf("%s/lobby/host?gameID=%s&private=true", *baseURL, exampleGameID), hostToken)
+	defer hostConn.Close()
+	hostHello := readJSON(t, hostConn, "host")
+	lobbyID, _ := hostHello["lobby_id"].(string)
+	if lobbyID == "" {
+		t.Fatalf("host: missing lobby_id, got %+v", hostHello)
+	}
+
+	// /lobby/find should NOT include this lobby.
+	findResp := DoReq(t, "GET", fmt.Sprintf("%s/lobby/find?gameID=%s", *baseURL, exampleGameID), nil, joinerToken, http.StatusOK)
+	if lobbies, ok := findResp["lobbies"].([]interface{}); ok {
+		for _, raw := range lobbies {
+			l, _ := raw.(map[string]interface{})
+			if l["id"] == lobbyID {
+				t.Fatalf("private lobby %s leaked into /lobby/find: %+v", lobbyID, l)
+			}
+		}
+	}
+
+	// But a direct join with the lobby ID still works.
+	joinerConn := WebsocketConnect(t, fmt.Sprintf("%s/lobby/join?lobbyID=%s", *baseURL, lobbyID), joinerToken)
+	defer joinerConn.Close()
+	joinerHello := readJSON(t, joinerConn, "joiner")
+	if joinerHello["status"] != "lobby_joined" {
+		t.Fatalf("direct join of private lobby failed: %+v", joinerHello)
+	}
+}
+
 func readJSON(t *testing.T, conn *websocket.Conn, label string) map[string]interface{} {
 	t.Helper()
 	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
@@ -199,30 +314,6 @@ func readEvent(t *testing.T, conn *websocket.Conn, label, want string) map[strin
 		}
 		if resp["event"] == want {
 			return resp
-		}
-	}
-}
-
-func waitForLobbyMatch(t *testing.T, conn *websocket.Conn, label string, out chan<- string) {
-	for {
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			out <- ""
-			return
-		}
-		var resp map[string]interface{}
-		if err := json.Unmarshal(msg, &resp); err != nil {
-			continue
-		}
-		switch resp["status"] {
-		case "match_found":
-			addr, _ := resp["server_address"].(string)
-			out <- addr
-			return
-		case "error":
-			t.Logf("%s: error: %+v", label, resp["error"])
-			out <- ""
-			return
 		}
 	}
 }
