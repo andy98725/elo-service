@@ -2993,13 +2993,7 @@ const docTemplate = `{
         "github_com_andy98725_elo-service_src_models.GameResp": {
             "type": "object",
             "properties": {
-                "default_rating": {
-                    "type": "integer"
-                },
                 "description": {
-                    "type": "string"
-                },
-                "elo_strategy": {
                     "type": "string"
                 },
                 "guests_allowed": {
@@ -3007,31 +3001,6 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "string"
-                },
-                "k_factor": {
-                    "type": "integer"
-                },
-                "lobby_enabled": {
-                    "description": "Legacy flat queue fields, mirrored from Queues[0]. Empty/zero\nwhen the game has no queues (transient state during creation).",
-                    "type": "boolean"
-                },
-                "lobby_size": {
-                    "type": "integer"
-                },
-                "matchmaking_machine_name": {
-                    "type": "string"
-                },
-                "matchmaking_machine_ports": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "matchmaking_strategy": {
-                    "type": "string"
-                },
-                "metadata_enabled": {
-                    "type": "boolean"
                 },
                 "name": {
                     "type": "string"

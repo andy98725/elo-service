@@ -177,23 +177,14 @@ Game listings return:
           "k_factor": 32,
           "metadata_enabled": false
         }
-      ],
-
-      // Legacy mirror of queues[0]. Kept for backwards compat with single-queue clients.
-      "lobby_enabled": true,
-      "lobby_size": 2,
-      "matchmaking_strategy": "random",
-      "matchmaking_machine_name": "alice/tictactoe:latest",
-      "matchmaking_machine_ports": [8080],
-      "elo_strategy": "unranked",
-      "metadata_enabled": false
+      ]
     }
   ],
   "nextPage": 1
 }
 ```
 
-Each game has an ordered `queues` array. The first element (`queues[0]`) is the **default queue** — the one used when matchmaking, lobby, or rating endpoints are called without an explicit `queueID`. Single-queue games (the default) need only the legacy mirror; multi-queue games (different game modes / images / ELO settings under one game) iterate `queues` and let the player pick.
+Each game has an ordered `queues` array. The first element (`queues[0]`) is the **default queue** — the one used when matchmaking, lobby, or rating endpoints are called without an explicit `queueID`. Single-queue games will only ever have one entry; multi-queue games (different game modes / images / ELO settings under one game) iterate `queues` and let the player pick.
 
 `nextPage` is the index to pass as `page` on the next call, **or `-1` if you've reached the end of the list** (the page returned fewer rows than `pageSize`). Stop paginating when you see `-1`.
 

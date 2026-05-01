@@ -337,7 +337,7 @@ Field reference:
 | `k_factor` | no | `32` | Primary queue field. Elo K factor (only used when `elo_strategy="classic"`). |
 | `metadata_enabled` | no | `false` | Primary queue field. If `true`, the `metadata` query param on `/match/join` segments the queue (e.g., by region or game mode). |
 
-Response `200`: a `GameResp` with the new `id` (UUID), a `queues` array (one entry: the primary queue), and the legacy flat fields mirrored from `queues[0]` for backwards compatibility.
+Response `200`: a `GameResp` with the new `id` (UUID) and a `queues` array (one entry: the primary queue). Per-queue config lives entirely under `queues[]` — read it from there.
 
 Update with `PUT /game/{id}` (only the owner). Delete with `DELETE /game/{id}` — cascades to all queues, ratings, and per-game player data.
 

@@ -27,11 +27,6 @@ func TestCreateGameMakesPrimaryQueue(t *testing.T) {
 	if q["lobby_size"].(float64) != 3 {
 		t.Errorf("expected primary lobby_size 3, got %v", q["lobby_size"])
 	}
-
-	// Legacy flat fields on GameResp must mirror queues[0].
-	if game["lobby_size"].(float64) != 3 {
-		t.Errorf("legacy lobby_size mirror broken: got %v", game["lobby_size"])
-	}
 }
 
 // TestQueueCRUDAndOwnership exercises the full queue CRUD lifecycle:

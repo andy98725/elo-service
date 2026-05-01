@@ -17,11 +17,16 @@ func TestCreateGame(t *testing.T) {
 	if game["name"] != "MyGame" {
 		t.Errorf("expected game name MyGame, got %v", game["name"])
 	}
-	if game["lobby_size"].(float64) != 2 {
-		t.Errorf("expected lobby size 2, got %v", game["lobby_size"])
+	queues, _ := game["queues"].([]interface{})
+	if len(queues) != 1 {
+		t.Fatalf("expected 1 queue, got %d", len(queues))
 	}
-	if game["matchmaking_strategy"] != "random" {
-		t.Errorf("expected strategy random, got %v", game["matchmaking_strategy"])
+	q := queues[0].(map[string]interface{})
+	if q["lobby_size"].(float64) != 2 {
+		t.Errorf("expected primary lobby_size 2, got %v", q["lobby_size"])
+	}
+	if q["matchmaking_strategy"] != "random" {
+		t.Errorf("expected primary strategy random, got %v", q["matchmaking_strategy"])
 	}
 }
 
