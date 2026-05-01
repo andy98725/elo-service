@@ -120,40 +120,55 @@ func Migrate() error {
 					return err
 				}
 
-				// 3. Re-key ratings: add game_queue_id, populate from
-				// the primary queue, swap the PK from (player, game) to
-				// (player, game_queue), drop game_id.
-				if !tx.Migrator().HasColumn(&Rating{}, "game_queue_id") {
-					if err := tx.Exec(`ALTER TABLE ratings ADD COLUMN game_queue_id uuid`).Error; err != nil {
+				// 3. Re-key ratings, OR create the table fresh.
+				//
+				// The pre-refactor AutoMigrate list omitted &Rating{}, so on
+				// some deployments the `ratings` table never existed at all
+				// (the Rating model was reachable from Go code but no GORM
+				// pass ever created its table). If we're running against
+				// such a DB there's nothing to rekey — let AutoMigrate
+				// create the table fresh in the new (player_id,
+				// game_queue_id) shape.
+				if !tx.Migrator().HasTable(&Rating{}) {
+					if err := tx.AutoMigrate(&Rating{}); err != nil {
 						return err
 					}
-				}
-				if err := tx.Exec(`
-					UPDATE ratings r
-					SET game_queue_id = (
-						SELECT gq.id FROM game_queues gq
-						WHERE gq.game_id = r.game_id
-						ORDER BY gq.created_at ASC, gq.id ASC
-						LIMIT 1
-					)
-					WHERE r.game_queue_id IS NULL
-				`).Error; err != nil {
-					return err
-				}
-				if err := tx.Exec(`ALTER TABLE ratings ALTER COLUMN game_queue_id SET NOT NULL`).Error; err != nil {
-					return err
-				}
-				// Drop the old PK and add the new one. Postgres names the
-				// PK constraint after the table by default.
-				if err := tx.Exec(`ALTER TABLE ratings DROP CONSTRAINT IF EXISTS ratings_pkey`).Error; err != nil {
-					return err
-				}
-				if err := tx.Exec(`ALTER TABLE ratings ADD PRIMARY KEY (player_id, game_queue_id)`).Error; err != nil {
-					return err
-				}
-				if tx.Migrator().HasColumn(&Rating{}, "game_id") {
-					if err := tx.Migrator().DropColumn(&Rating{}, "game_id"); err != nil {
+				} else {
+					// Existing data: add game_queue_id, populate from the
+					// primary queue, swap PK from (player, game) to
+					// (player, game_queue), drop game_id.
+					if !tx.Migrator().HasColumn(&Rating{}, "game_queue_id") {
+						if err := tx.Exec(`ALTER TABLE ratings ADD COLUMN game_queue_id uuid`).Error; err != nil {
+							return err
+						}
+					}
+					if err := tx.Exec(`
+						UPDATE ratings r
+						SET game_queue_id = (
+							SELECT gq.id FROM game_queues gq
+							WHERE gq.game_id = r.game_id
+							ORDER BY gq.created_at ASC, gq.id ASC
+							LIMIT 1
+						)
+						WHERE r.game_queue_id IS NULL
+					`).Error; err != nil {
 						return err
+					}
+					if err := tx.Exec(`ALTER TABLE ratings ALTER COLUMN game_queue_id SET NOT NULL`).Error; err != nil {
+						return err
+					}
+					// Drop the old PK and add the new one. Postgres names the
+					// PK constraint after the table by default.
+					if err := tx.Exec(`ALTER TABLE ratings DROP CONSTRAINT IF EXISTS ratings_pkey`).Error; err != nil {
+						return err
+					}
+					if err := tx.Exec(`ALTER TABLE ratings ADD PRIMARY KEY (player_id, game_queue_id)`).Error; err != nil {
+						return err
+					}
+					if tx.Migrator().HasColumn(&Rating{}, "game_id") {
+						if err := tx.Migrator().DropColumn(&Rating{}, "game_id"); err != nil {
+							return err
+						}
 					}
 				}
 
