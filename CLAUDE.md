@@ -130,6 +130,10 @@ JWT-based, two token types validated in [`src/api/auth/middleware.go`](src/api/a
 
 Use `RequireUserOrGuestAuth` for endpoints that accept either; `c.Get("id")` always returns the effective player ID after impersonation resolution.
 
+**Admin credential for ops actions.** The `.env` file at the repo root holds an `ADMIN_JWT=...` line — a JWT for an admin user (`tetr4`) on the live `elomm.net` service. Use it as the bearer credential when an agent or developer needs to perform an admin action against production (creating/updating games on behalf of a user, granting `can_create_game`, etc.). It is **not** consumed by the matchmaker process — it's a developer-side stash, separate from `JWT_SECRET_KEY`. `.env` is gitignored.
+
+The JWT lifetime is 24 hours (`JWT_TIMEOUT` in `src/api/auth/jwt.go`), so the stash needs periodic refresh: `POST /user/login` as `tetr4` (creds in `local.env` as `STAGING_USER` / `STAGING_PASSWORD`) and replace the `ADMIN_JWT=` line in `.env`. The stashed token has `impersonation_id=""`, so calls made with it act as `tetr4`. Acting as another user requires minting a new JWT with `impersonation_id` set in the claims, which needs `JWT_SECRET_KEY` (a Fly secret on the live app, not in `.env`).
+
 ## Testing
 
 Two test suites:

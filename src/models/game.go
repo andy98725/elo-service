@@ -163,8 +163,11 @@ func CreateGame(params CreateGameParams, owner User) (*Game, error) {
 }
 
 // gameQuery preloads queues in their canonical order (default = Queues[0]).
+// Owner is preloaded so GameResp.Owner serializes with the real user; without
+// it, GORM leaves the embedded User struct zero-valued and the JSON response
+// shows owner.id="" / username="" / email="".
 func gameQuery() *gorm.DB {
-	return server.S.DB.Preload("Queues", func(db *gorm.DB) *gorm.DB {
+	return server.S.DB.Preload("Owner").Preload("Queues", func(db *gorm.DB) *gorm.DB {
 		return db.Order("created_at ASC, id ASC")
 	})
 }
