@@ -30,6 +30,36 @@ func TestCreateGame(t *testing.T) {
 	}
 }
 
+// TestGetGameIncludesOwner asserts the GET /game/{id} response carries a
+// populated owner block. Before gameQuery() preloaded the Owner relation,
+// the JSON serialized as id="" / username="" / email="" because GORM left
+// the embedded User struct zero-valued.
+func TestGetGameIncludesOwner(t *testing.T) {
+	h := NewHarness(t)
+
+	owner := RegisterUser(t, h.BaseURL(), "ownerprl", "ownerprl@example.com", "pass")
+	ownerID := owner["id"].(string)
+	token, _ := LoginUser(t, h.BaseURL(), "ownerprl@example.com", "pass")
+
+	created := CreateGame(t, h.BaseURL(), token, "OwnerPreloadGame", 2)
+	gameID := created["id"].(string)
+
+	resp := DoReq(t, "GET", fmt.Sprintf("%s/game/%s", h.BaseURL(), gameID), nil, "", http.StatusOK)
+	ownerBlock, ok := resp["owner"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("response missing owner block: %+v", resp)
+	}
+	if ownerBlock["id"] != ownerID {
+		t.Errorf("owner.id = %q, want %q", ownerBlock["id"], ownerID)
+	}
+	if ownerBlock["username"] != "ownerprl" {
+		t.Errorf("owner.username = %q, want %q", ownerBlock["username"], "ownerprl")
+	}
+	if ownerBlock["email"] != "ownerprl@example.com" {
+		t.Errorf("owner.email = %q, want %q", ownerBlock["email"], "ownerprl@example.com")
+	}
+}
+
 func TestCreateGameDuplicateName(t *testing.T) {
 	h := NewHarness(t)
 

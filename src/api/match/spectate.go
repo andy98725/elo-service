@@ -97,8 +97,9 @@ func GetMatchStream(ctx echo.Context) error {
 			if errors.Is(err, aws.ErrNotFound) {
 				if !matchInDB {
 					// Match is gone AND no replay manifest — the
-					// match either never streamed or its replay
-					// aged out under the 7-day TTL.
+					// match either never streamed or the replay was
+					// removed manually. Replays have no lifecycle
+					// rule configured today; see CLAUDE.md "S3 layout".
 					return echo.NewHTTPError(http.StatusNotFound, "Match not found")
 				}
 				// Match is in DB and spectate-enabled but the uploader
