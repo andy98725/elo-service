@@ -21,9 +21,9 @@ type liveMatch struct {
 	Players   []string `json:"players"`
 	GuestIDs  []string `json:"guest_ids"`
 	// HasStream answers "is this match actually streaming right now?"
-	// for the spectator UI's "Watch" button. Always false in this slice
-	// — the streaming pipeline lands in slice 2; this flag flips true
-	// once the manifest write is wired up.
+	// for the spectator UI's "Watch" button. Set by probing the S3
+	// manifest below — true once the uploader has written its first
+	// chunk, false until then or if S3 errors.
 	HasStream bool `json:"has_stream"`
 }
 

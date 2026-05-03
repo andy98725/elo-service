@@ -399,7 +399,7 @@ Response `200`:
 
 `404` when the game itself doesn't have `spectate_enabled` (regardless of the caller — it's the game's choice, not a per-user permission). Empty `matches` array when no started matches exist.
 
-`has_stream` answers "is this match actually streaming bytes right now?" — wire it to your "Watch" button. **It is always `false` today** (slice 1 ships discovery only); the spectator stream pipeline lands later. The connection details (server host/ports) are deliberately not in this response — spectators don't dial the game server directly; they consume the matchmaker-proxied stream once that route exists.
+`has_stream` answers "is this match actually streaming bytes right now?" — wire it to your "Watch" button. The matchmaker probes the S3 manifest to decide; it flips `true` once the uploader has written its first chunk (typically within a second of match start) and stays `true` for the life of the match. A spectate-enabled match with `has_stream: false` means the game server hasn't written to `/shared/spectate.stream` yet. The connection details (server host/ports) are deliberately not in this response — spectators don't dial the game server directly; they consume the matchmaker-proxied stream at `/matches/<matchID>/stream`.
 
 **Per-match override (lobbies only).** A lobby host can disable spectating on a single match by passing `?spectate=false` to `/lobby/host`. The flag is **disable-only** — passing `spectate=true` on a non-spectate game does nothing. Matches paired through the matchmaking queue inherit the game flag with no override.
 
